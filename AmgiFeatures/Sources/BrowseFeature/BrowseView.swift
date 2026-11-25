@@ -6,8 +6,10 @@
 //
 
 package import SwiftUI
+import AppCore
 import AppShared
-import AnkiKit
+package import AnkiKit
+import Dependencies
 import Theme
 import SwiftUINavigation
 
@@ -17,42 +19,59 @@ enum BrowseSortOrder: String, CaseIterable, Sendable {
     case templateAsc = "Type (A→Z)"
 }
 
-/// Browse container: owns navigation, sheets, selection, and the toolbar,
-/// and drives a `BrowseModel` for load/search/paging + note mutations.
-/// Rendering is delegated to `BrowseContent`; the model owns all I/O so the
-/// View is thin presentation wiring with no direct engine access.
+/// Browse container: AnkiDroid-style Card & Note Browser.
+/// In Cards mode, tapping a card launches the non-marking Card Viewer (`CardPreviewerView`);
+/// in Notes mode, tapping a note opens `NoteEditingDestinationView`.
 package struct BrowseView: View {
     @State private var model: BrowseModel
     @State private var selectionState = BrowseSelectionState()
     @State private var destination: BrowseDestination?
     @State private var pendingTool: BrowseTool?
+    @State private var previewRequest: CardPreviewRequest?
+    @State private var cardActions = CardContextMenuModel()
+    @State private var hostConfirmDeleteNote = false
+    @State private var hostContextCardId: CardID?
+    @State private var hostContextNoteId: NoteID?
     @FocusState private var searchFocused: Bool
 
-    package init() {
-        _model = State(initialValue: BrowseModel())
+    @Environment(\.cardPreview) private var cardPreview
+    @Dependency(\.collectionStore) private var store
+
+    package init(initialDeck: DeckInfo? = nil) {
+        _model = State(initialValue: BrowseModel(browseMode: .cards, initialDeck: initialDeck))
     }
 
-    /// Seeded init for previews and tests — `BrowseModel` stays package-internal
-    /// so the target's public surface is the four entry views, nothing more.
     init(model: BrowseModel) {
         _model = State(initialValue: model)
     }
 
-    // The body is split into small layered computed views: a single chained
-    // expression here blows past the Swift type-checker's time budget, so each
-    // layer applies only a few modifiers.
     package var body: some View {
         @Bindable var model = model
         decoratedContent
-            .searchable(text: $model.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search notes...")
+            .searchable(
+                text: $model.searchText,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: model.browseMode == .cards ? "Search cards (deck:, tag:, is:due)..." : "Search notes..."
+            )
             .searchFocused($searchFocused)
             .task { await model.loadInitial() }
-            // Keyed on the assembled query so text, deck, and tag changes all
-            // restart one search — SwiftUI cancels the previous run, which is
-            // what debounces the typing and keeps a stale result from landing.
             .task(id: model.searchQuery) { await model.performSearch() }
             .sensoryFeedback(trigger: selectionState.isSelectMode) { _, entered in
                 entered ? .selection : nil
+            }
+            .fullScreenCover(item: $previewRequest) { request in
+                if let cardPreview {
+                    cardPreview.previewView(
+                        request: request,
+                        onCollectionChanged: {
+                            store.invalidateAll()
+                        },
+                        onDismiss: {
+                            previewRequest = nil
+                            Task { await model.performSearch(debounce: .zero) }
+                        }
+                    )
+                }
             }
     }
 
@@ -67,6 +86,16 @@ package struct BrowseView: View {
                 case .duplicates: DuplicatesView()
                 }
             }
+            .cardActionPresentations(
+                model: cardActions,
+                cardId: hostContextCardId,
+                noteId: hostContextNoteId,
+                confirmDeleteNote: $hostConfirmDeleteNote,
+                onAction: { _ in
+                    store.invalidateAll()
+                    Task { await model.performSearch(debounce: .zero) }
+                }
+            )
     }
 
     private var dialogContent: some View {
@@ -84,7 +113,21 @@ package struct BrowseView: View {
                 Text("This action cannot be undone.")
             }
             .confirmationDialog(
-                "Delete \(selectionState.count) note\(selectionState.count == 1 ? "" : "s")?",
+                "Delete this note?",
+                isPresented: Binding($destination.deleteNoteByID),
+                presenting: pendingDeleteNoteID
+            ) { noteId in
+                Button("Delete", role: .destructive) {
+                    Task { await model.delete(noteId) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("This deletes the note and all its cards. This action cannot be undone.")
+            }
+            .confirmationDialog(
+                model.browseMode == .cards
+                    ? "Delete \(selectionState.selectedCardIDs.count) card\(selectionState.selectedCardIDs.count == 1 ? "" : "s")?"
+                    : "Delete \(selectionState.selectedNoteIDs.count) note\(selectionState.selectedNoteIDs.count == 1 ? "" : "s")?",
                 isPresented: $destination.deleteSelected
             ) {
                 Button("Delete", role: .destructive) {
@@ -101,22 +144,72 @@ package struct BrowseView: View {
         return nil
     }
 
+    private var pendingDeleteNoteID: NoteID? {
+        if case .deleteNoteByID(let nid) = destination { return nid }
+        return nil
+    }
+
+    private var pendingRescheduleCardIDs: [CardID]? {
+        if case .rescheduleSelectedCards(let ids) = destination { return ids }
+        return nil
+    }
+
+    private var pendingChangeDeckCardIDs: [CardID]? {
+        if case .changeDeckSelectedCards(let ids) = destination { return ids }
+        return nil
+    }
+
     private var sheetContent: some View {
         BrowseContent(
             model: model,
+            cardActions: cardActions,
             selectionState: $selectionState,
+            onPreviewCard: { index in
+                previewCards(startingAt: index)
+            },
+            onEditNote: { note in
+                destination = .editNote(note)
+            },
+            onRequestDeleteNote: { noteId in
+                destination = .deleteNoteByID(noteId)
+            },
             onSwipeDelete: { destination = .deleteNote($0) }
         )
         .sheet(isPresented: $destination.addNote) {
-            AddNoteView {
-                Task { await model.performSearch() }
+            AddNoteView(preselectedDeckId: model.activeDeck?.id) {
+                Task { await model.performSearch(debounce: .zero) }
             }
         }
         #if canImport(UIKit)
         .sheet(isPresented: $destination.addImageOcclusion) {
-            AddImageOcclusionNoteView { Task { await model.performSearch() } }
+            AddImageOcclusionNoteView { Task { await model.performSearch(debounce: .zero) } }
         }
         #endif
+        .sheet(item: $destination.editNote) { note in
+            NoteEditingDestinationView(note: note, embedInNavigationStack: true) {
+                Task { await model.performSearch(debounce: .zero) }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { pendingRescheduleCardIDs != nil },
+            set: { if !$0 { destination = nil } }
+        )) {
+            if let ids = pendingRescheduleCardIDs {
+                RescheduleCardSheet(cardIds: ids) { spec in
+                    await model.rescheduleSelectedCards(ids, spec: spec)
+                }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { pendingChangeDeckCardIDs != nil },
+            set: { if !$0 { destination = nil } }
+        )) {
+            if let ids = pendingChangeDeckCardIDs {
+                ChangeDeckSheet(cardIds: ids) { deckId in
+                    await model.changeDeckSelectedCards(ids, to: deckId)
+                }
+            }
+        }
         .alert(
             "Some changes didn't apply",
             isPresented: Binding(
@@ -130,19 +223,19 @@ package struct BrowseView: View {
         }
         .sheet(isPresented: $destination.findReplaceSelected) {
             FindReplaceSheet(noteIDs: Array(selectionState.selectedNoteIDs)) {
-                Task { await model.performSearch() }
+                Task { await model.performSearch(debounce: .zero) }
             }
         }
         .sheet(isPresented: $destination.findReplaceAll) {
             FindReplaceSheet(noteIDs: []) {
-                Task { await model.performSearch() }
+                Task { await model.performSearch(debounce: .zero) }
             }
         }
         .sheet(isPresented: $destination.batchTag) {
             BatchTagSheet(noteIDs: selectionState.selectedNoteIDs) {
                 Task {
                     selectionState.exitSelectMode()
-                    await model.performSearch()
+                    await model.performSearch(debounce: .zero)
                 }
             }
         }
@@ -160,6 +253,17 @@ package struct BrowseView: View {
             }
             selectionToolbar
         } else {
+            if model.browseMode == .cards && !model.allCardIDs.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        previewCards(startingAt: 0)
+                    } label: {
+                        Label("Preview", systemImage: "eye")
+                    }
+                    .accessibilityLabel("Preview filtered cards")
+                }
+            }
+
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("Add Note", systemImage: "square.and.pencil") {
@@ -175,19 +279,25 @@ package struct BrowseView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    if !model.notes.isEmpty {
+                    if !model.notes.isEmpty || !model.cardItems.isEmpty {
                         Section {
                             Button("Select", systemImage: "checkmark.circle") {
-                                selectionState.enterSelectMode()
-                            }
-                        }
-                        Section {
-                            Picker("Sort By", selection: $model.sortOrder) {
-                                ForEach(BrowseSortOrder.allCases, id: \.self) { order in
-                                    Text(order.rawValue).tag(order)
+                                if model.browseMode == .cards {
+                                    selectionState.enterCardSelectMode()
+                                } else {
+                                    selectionState.enterSelectMode()
                                 }
                             }
-                            .pickerStyle(.inline)
+                        }
+                        if model.browseMode == .notes {
+                            Section {
+                                Picker("Sort By", selection: $model.sortOrder) {
+                                    ForEach(BrowseSortOrder.allCases, id: \.self) { order in
+                                        Text(order.rawValue).tag(order)
+                                    }
+                                }
+                                .pickerStyle(.inline)
+                            }
                         }
                     }
                     Section {
@@ -211,106 +321,214 @@ package struct BrowseView: View {
 
     @ToolbarContentBuilder
     private var selectionToolbar: some ToolbarContent {
-        ToolbarItem(placement: .bottomBar) {
-            Button {
-                suspendSelected()
-            } label: {
-                Label("Suspend", systemImage: "pause.circle")
+        if model.browseMode == .cards {
+            ToolbarItem(placement: .bottomBar) {
+                Menu {
+                    Button { suspendSelectedCards() } label: { Label("Suspend", systemImage: "pause.circle") }
+                    Button { unsuspendSelectedCards() } label: { Label("Unsuspend / Unbury", systemImage: "play.circle") }
+                } label: {
+                    Label("State", systemImage: "pause.circle")
+                }
+                .disabled(selectionState.selectedCardIDs.isEmpty)
             }
-            .disabled(selectionState.isEmpty)
-        }
-        ToolbarItem(placement: .bottomBar) { Spacer() }
-        ToolbarItem(placement: .bottomBar) {
-            Menu {
-                Button { applyFlag(1) } label: { Label("Red flag",       systemImage: "flag.fill") }
-                Button { applyFlag(2) } label: { Label("Orange flag",    systemImage: "flag.fill") }
-                Button { applyFlag(3) } label: { Label("Green flag",     systemImage: "flag.fill") }
-                Button { applyFlag(4) } label: { Label("Blue flag",      systemImage: "flag.fill") }
-                Button { applyFlag(5) } label: { Label("Pink flag",      systemImage: "flag.fill") }
-                Button { applyFlag(6) } label: { Label("Turquoise flag", systemImage: "flag.fill") }
-                Button { applyFlag(7) } label: { Label("Purple flag",    systemImage: "flag.fill") }
-                Divider()
-                Button { applyFlag(0) } label: { Label("Clear flag",     systemImage: "flag.slash") }
-            } label: {
-                Label("Flag", systemImage: "flag")
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    let ids = Array(selectionState.selectedCardIDs)
+                    selectionState.exitSelectMode()
+                    destination = .rescheduleSelectedCards(ids)
+                } label: {
+                    Label("Reschedule", systemImage: "calendar.badge.clock")
+                }
+                .disabled(selectionState.selectedCardIDs.isEmpty)
             }
-            .disabled(selectionState.isEmpty)
-        }
-        ToolbarItem(placement: .bottomBar) { Spacer() }
-        ToolbarItem(placement: .bottomBar) {
-            Button {
-                destination = .batchTag
-            } label: {
-                Label("Tags", systemImage: "tag")
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    let ids = Array(selectionState.selectedCardIDs)
+                    selectionState.exitSelectMode()
+                    destination = .changeDeckSelectedCards(ids)
+                } label: {
+                    Label("Deck", systemImage: "folder")
+                }
+                .disabled(selectionState.selectedCardIDs.isEmpty)
             }
-            .disabled(selectionState.isEmpty)
-        }
-        ToolbarItem(placement: .bottomBar) { Spacer() }
-        ToolbarItem(placement: .bottomBar) {
-            Button {
-                destination = .findReplaceSelected
-            } label: {
-                Label("Find & Replace", systemImage: "text.magnifyingglass")
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                flagMenu.disabled(selectionState.selectedCardIDs.isEmpty)
             }
-            .disabled(selectionState.isEmpty)
-        }
-        ToolbarItem(placement: .bottomBar) { Spacer() }
-        ToolbarItem(placement: .bottomBar) {
-            Button(role: .destructive) {
-                destination = .deleteSelected
-            } label: {
-                Label("Delete", systemImage: "trash")
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                Button(role: .destructive) {
+                    destination = .deleteSelected
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(selectionState.selectedCardIDs.isEmpty)
             }
-            .disabled(selectionState.isEmpty)
+        } else {
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    suspendSelected()
+                } label: {
+                    Label("Suspend", systemImage: "pause.circle")
+                }
+                .disabled(selectionState.isEmpty)
+            }
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                flagMenu.disabled(selectionState.isEmpty)
+            }
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    destination = .batchTag
+                } label: {
+                    Label("Tags", systemImage: "tag")
+                }
+                .disabled(selectionState.isEmpty)
+            }
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    destination = .findReplaceSelected
+                } label: {
+                    Label("Find & Replace", systemImage: "text.magnifyingglass")
+                }
+                .disabled(selectionState.isEmpty)
+            }
+            ToolbarItem(placement: .bottomBar) { Spacer() }
+            ToolbarItem(placement: .bottomBar) {
+                Button(role: .destructive) {
+                    destination = .deleteSelected
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(selectionState.isEmpty)
+            }
         }
+    }
+
+    private var flagMenu: some View {
+        Menu {
+            Button { applyFlag(1) } label: { Label("Red flag",       systemImage: "flag.fill") }
+            Button { applyFlag(2) } label: { Label("Orange flag",    systemImage: "flag.fill") }
+            Button { applyFlag(3) } label: { Label("Green flag",     systemImage: "flag.fill") }
+            Button { applyFlag(4) } label: { Label("Blue flag",      systemImage: "flag.fill") }
+            Button { applyFlag(5) } label: { Label("Pink flag",      systemImage: "flag.fill") }
+            Button { applyFlag(6) } label: { Label("Turquoise flag", systemImage: "flag.fill") }
+            Button { applyFlag(7) } label: { Label("Purple flag",    systemImage: "flag.fill") }
+            Divider()
+            Button { applyFlag(0) } label: { Label("Clear flag",     systemImage: "flag.slash") }
+        } label: {
+            Label("Flag", systemImage: "flag")
+        }
+    }
+
+    // MARK: - Preview launch
+
+    private func previewCards(startingAt index: Int) {
+        guard !model.allCardIDs.isEmpty else { return }
+        previewRequest = CardPreviewRequest(
+            cardIds: model.allCardIDs,
+            initialIndex: index,
+            title: model.activeDeck?.name ?? "Card Viewer"
+        )
     }
 
     // MARK: - Selection actions
 
-    /// Capture the current selection, drop out of select mode for snappy
-    /// feedback, then run the batch mutation on the model.
     private func suspendSelected() {
         let ids = selectionState.selectedNoteIDs
         selectionState.exitSelectMode()
         Task { await model.suspendSelected(ids) }
     }
 
-    private func applyFlag(_ value: UInt32) {
-        let ids = selectionState.selectedNoteIDs
+    private func suspendSelectedCards() {
+        let ids = selectionState.selectedCardIDs
         selectionState.exitSelectMode()
-        Task { await model.flagSelected(ids, value: value) }
+        Task { await model.suspendSelectedCards(ids) }
+    }
+
+    private func unsuspendSelectedCards() {
+        let ids = selectionState.selectedCardIDs
+        selectionState.exitSelectMode()
+        Task { await model.unsuspendSelectedCards(ids) }
+    }
+
+    private func applyFlag(_ value: UInt32) {
+        if model.browseMode == .cards {
+            let ids = selectionState.selectedCardIDs
+            selectionState.exitSelectMode()
+            Task { await model.flagSelectedCards(ids, value: value) }
+        } else {
+            let ids = selectionState.selectedNoteIDs
+            selectionState.exitSelectMode()
+            Task { await model.flagSelected(ids, value: value) }
+        }
     }
 
     private func deleteSelected() {
-        let ids = selectionState.selectedNoteIDs
-        selectionState.exitSelectMode()
-        Task { await model.deleteSelected(ids) }
+        if model.browseMode == .cards {
+            let ids = selectionState.selectedCardIDs
+            selectionState.exitSelectMode()
+            Task { await model.deleteSelectedCards(ids) }
+        } else {
+            let ids = selectionState.selectedNoteIDs
+            selectionState.exitSelectMode()
+            Task { await model.deleteSelected(ids) }
+        }
     }
 }
 
 // MARK: - BrowseContent
 
-/// Pure rendering for the Browse screen: the note list (with select-mode,
-/// swipe-to-delete, and paging hooks) plus the deck/tag filter bar. Reads
-/// state from the model and drives mutations through it, but owns no I/O of
-/// its own — so it renders in a `#Preview` from a seeded model.
 struct BrowseContent: View {
     @Environment(\.palette) private var palette
     @Bindable var model: BrowseModel
+    let cardActions: CardContextMenuModel
     @Binding var selectionState: BrowseSelectionState
+    let onPreviewCard: (Int) -> Void
+    let onEditNote: (NoteRecord) -> Void
+    let onRequestDeleteNote: (NoteID) -> Void
     let onSwipeDelete: (NoteRecord) -> Void
 
     var body: some View {
         statefulContent
             .safeAreaInset(edge: .top) {
-                if !model.allDecks.isEmpty || !model.allTags.isEmpty {
-                    filterBar
-                }
+                filterBar
             }
     }
 
     @ViewBuilder
     private var statefulContent: some View {
+        if model.browseMode == .cards {
+            cardsStatefulContent
+        } else {
+            notesStatefulContent
+        }
+    }
+
+    @ViewBuilder
+    private var cardsStatefulContent: some View {
+        if model.cardItems.isEmpty && !model.isLoading && model.searchFailed {
+            searchFailedView
+        } else if model.cardItems.isEmpty && !model.isLoading && model.searchText.isEmpty
+            && model.activeDeck == nil && model.activeTag == nil && model.cardStateFilter == .all {
+            ContentUnavailableView(
+                "Browse Cards",
+                systemImage: "rectangle.grid.1x2",
+                description: Text("Search by content, tags, state, or filter by deck.")
+            )
+        } else if model.cardItems.isEmpty && !model.isLoading {
+            ContentUnavailableView.search(text: model.searchText)
+        } else {
+            cardList
+        }
+    }
+
+    @ViewBuilder
+    private var notesStatefulContent: some View {
         if model.notes.isEmpty && !model.isLoading && model.searchText.isEmpty
             && model.activeDeck == nil && model.activeTag == nil {
             ContentUnavailableView(
@@ -319,19 +537,116 @@ struct BrowseContent: View {
                 description: Text("Search by content, tags, or filter by deck.")
             )
         } else if model.notes.isEmpty && !model.isLoading && model.searchFailed {
-            ContentUnavailableView {
-                Label("Search Failed", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text("The collection couldn't be searched.")
-            } actions: {
-                Button("Try Again") {
-                    Task { await model.performSearch(debounce: .zero) }
-                }
-            }
+            searchFailedView
         } else if model.notes.isEmpty && !model.isLoading {
             ContentUnavailableView.search(text: model.searchText)
         } else {
             noteList
+        }
+    }
+
+    private var searchFailedView: some View {
+        ContentUnavailableView {
+            Label("Search Failed", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text("The collection couldn't be searched.")
+        } actions: {
+            Button("Try Again") {
+                Task { await model.performSearch(debounce: .zero) }
+            }
+        }
+    }
+
+    // MARK: - Card List (AnkiDroid-style)
+
+    private var cardList: some View {
+        List {
+            ForEach(Array(model.cardItems.enumerated()), id: \.element.id) { index, item in
+                cardRow(item, index: index)
+            }
+
+            if model.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cardRow(_ item: BrowseCardItem, index: Int) -> some View {
+        if selectionState.isSelectMode {
+            Button {
+                selectionState.toggleCard(item.id)
+            } label: {
+                HStack {
+                    Image(systemName: selectionState.containsCard(item.id) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selectionState.containsCard(item.id) ? palette.accent : palette.textSecondary)
+                        .accessibilityHidden(true)
+                    CardRowSummaryView(
+                        item: item,
+                        deckName: item.card.flatMap { model.deckNamesByID[$0.did] },
+                        notetypeName: item.note.flatMap { model.notetypeNames[$0.mid] }
+                    )
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressScale)
+            .accessibilityAddTraits(selectionState.containsCard(item.id) ? .isSelected : [])
+            .onAppear { onCardRowAppear(item) }
+        } else {
+            HStack(spacing: AmgiSpacing.sm) {
+                Button {
+                    onPreviewCard(index)
+                } label: {
+                    CardRowSummaryView(
+                        item: item,
+                        deckName: item.card.flatMap { model.deckNamesByID[$0.did] },
+                        notetypeName: item.note.flatMap { model.notetypeNames[$0.mid] }
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onAppear { onCardRowAppear(item) }
+
+                HostedCardContextMenu(
+                    model: cardActions,
+                    cardId: item.id,
+                    noteId: item.note?.id,
+                    isSuspended: item.card?.queue == -1,
+                    isBuried: item.card?.queue == -2 || item.card?.queue == -3,
+                    onEditNote: item.note.map { note in { onEditNote(note) } },
+                    onRequestDeleteNote: onRequestDeleteNote,
+                    onAction: { _ in
+                        Task { await model.performSearch(debounce: .zero) }
+                    }
+                )
+            }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                    selectionState.enterCardSelectMode(preselect: item.id)
+                }
+            )
+            .accessibilityAction(named: "Select") {
+                selectionState.enterCardSelectMode(preselect: item.id)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if let note = item.note {
+                    Button {
+                        onEditNote(note)
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                }
+            }
+        }
+    }
+
+    private func onCardRowAppear(_ item: BrowseCardItem) {
+        if item.isStub {
+            Task { await model.fetchCardDetails(id: item.id) }
+        }
+        if item.id == model.cardItems.last?.id {
+            Task { await model.loadNextCardPage() }
         }
     }
 
@@ -361,17 +676,13 @@ struct BrowseContent: View {
     private func noteRow(_ note: NoteRecord) -> some View {
         HStack {
             if selectionState.isSelectMode {
-                // A `Button`, not `.onTapGesture` — VoiceOver announces a
-                // tap gesture on a plain row as static text, so the row
-                // reads as unactionable and selection can't be reached at
-                // all with the screen reader on.
                 Button {
                     selectionState.toggle(note.id)
                 } label: {
                     HStack {
                         Image(systemName: selectionState.contains(note.id) ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(selectionState.contains(note.id) ? palette.accent : palette.textSecondary)
-                            .accessibilityHidden(true)   // the .isSelected trait already says this
+                            .accessibilityHidden(true)
                         NoteRowView(note: note, notetypeName: model.notetypeNames[note.mid])
                     }
                     .contentShape(Rectangle())
@@ -389,8 +700,13 @@ struct BrowseContent: View {
                         NoteRowView(note: note, notetypeName: model.notetypeNames[note.mid])
                             .onAppear { onRowAppear(note) }
                     }
-                    NoteContextMenuButton(model: model, noteId: note.id) {
-                        Task { await model.performSearch() }
+                    NoteContextMenuButton(
+                        model: model,
+                        cardActions: cardActions,
+                        noteId: note.id,
+                        onRequestDeleteNote: onRequestDeleteNote
+                    ) {
+                        Task { await model.performSearch(debounce: .zero) }
                     }
                 }
                 .contentShape(Rectangle())
@@ -399,9 +715,6 @@ struct BrowseContent: View {
                         selectionState.enterSelectMode(preselect: note.id)
                     }
                 )
-                // The long press is the only way into select mode, and it's
-                // not a gesture VoiceOver can perform — expose it as a named
-                // action in the rotor as well.
                 .accessibilityAction(named: "Select") {
                     selectionState.enterSelectMode(preselect: note.id)
                 }
@@ -409,8 +722,6 @@ struct BrowseContent: View {
         }
     }
 
-    /// Lazy-load stub notes when they scroll on screen, and page in the next
-    /// batch as the last row appears.
     private func onRowAppear(_ note: NoteRecord) {
         if note.sfld == "Loading..." {
             Task { await model.fetchNoteDetails(id: note.id) }
@@ -424,6 +735,25 @@ struct BrowseContent: View {
 
     private var filterBar: some View {
         VStack(spacing: 0) {
+            Picker("Browse Mode", selection: Binding(
+                get: { model.browseMode },
+                set: { newMode in
+                    selectionState.exitSelectMode()
+                    model.browseMode = newMode
+                }
+            )) {
+                ForEach(BrowseMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, AmgiSpacing.sm)
+            .padding(.bottom, AmgiSpacing.xs)
+
+            if model.browseMode == .cards {
+                cardStateChipRow
+            }
             if !model.allDecks.isEmpty {
                 deckFilterBar
             }
@@ -432,6 +762,24 @@ struct BrowseContent: View {
             }
         }
         .background(.bar)
+    }
+
+    private var cardStateChipRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AmgiSpacing.sm) {
+                ForEach(BrowseCardStateFilter.allCases) { filter in
+                    chipButton(
+                        label: filter.rawValue,
+                        isSelected: model.cardStateFilter == filter,
+                        small: true
+                    ) {
+                        model.cardStateFilter = filter
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+        }
     }
 
     private var tagChipRow: some View {
@@ -453,7 +801,6 @@ struct BrowseContent: View {
 
     private var deckFilterBar: some View {
         VStack(spacing: 0) {
-            // Top-level deck chips
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     chipButton(label: "All", isSelected: model.activeDeck == nil) {
@@ -474,11 +821,9 @@ struct BrowseContent: View {
                 .padding(.vertical, 8)
             }
 
-            // Subdeck row — stays visible as long as a parent with children is selected
             if !model.childDecks.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        // "All" chip = parent deck (includes subdecks)
                         chipButton(
                             label: "All",
                             isSelected: model.activeDeck?.id == model.parentDeck?.id,
@@ -528,19 +873,78 @@ private extension BrowseContent {
     }
 }
 
+// MARK: - CardRowSummaryView
+
+private struct CardRowSummaryView: View {
+    @Environment(\.palette) private var palette
+    let item: BrowseCardItem
+    let deckName: String?
+    let notetypeName: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AmgiSpacing.xs) {
+            HStack(spacing: AmgiSpacing.xs) {
+                if item.flagValue > 0 {
+                    Image(systemName: "flag.fill")
+                        .amgiFont(.micro)
+                        .foregroundStyle(CardFlag.color(item.flagValue))
+                }
+                Text(item.title)
+                    .amgiFont(.body)
+                    .foregroundStyle(item.card?.queue == -1 ? palette.textSecondary : palette.textPrimary)
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: AmgiSpacing.sm) {
+                if let state = item.stateLabel {
+                    Text(state)
+                        .amgiFont(.micro)
+                        .foregroundStyle(stateColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(stateColor.opacity(0.14), in: Capsule())
+                }
+                if let deckName {
+                    Text(deckName)
+                        .amgiFont(.caption)
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(1)
+                }
+                if let notetypeName {
+                    Text(notetypeName)
+                        .amgiFont(.caption)
+                        .foregroundStyle(palette.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var stateColor: Color {
+        guard let card = item.card else { return palette.textSecondary }
+        if card.queue == -1 || card.queue == -2 || card.queue == -3 {
+            return palette.cardStateSuspended
+        }
+        switch card.type {
+        case 0: return palette.cardStateNew
+        case 1: return palette.cardStateLearning
+        case 2: return palette.cardStateReview
+        case 3: return palette.cardStateRelearn
+        default: return palette.textSecondary
+        }
+    }
+}
+
 // MARK: - NoteContextMenuButton
 
-/// Resolves the first cardId for a note lazily on first appear, then shows
-/// CardContextMenu.
-///
-/// The resolved ID is held in local `@State` while the model keeps the shared
-/// cache behind `firstCardID(for:)` — so scrolling a row out and back still
-/// doesn't re-issue the backend lookup, but one row resolving no longer
-/// invalidates every other row's menu button.
 @MainActor
 struct NoteContextMenuButton: View {
     let model: BrowseModel
+    let cardActions: CardContextMenuModel
     let noteId: NoteID
+    var onRequestDeleteNote: ((NoteID) -> Void)?
     var onSuccess: (() -> Void)?
 
     @State private var cardId: CardID?
@@ -548,10 +952,12 @@ struct NoteContextMenuButton: View {
     var body: some View {
         Group {
             if let cardId {
-                CardContextMenu(
+                HostedCardContextMenu(
+                    model: cardActions,
                     cardId: cardId,
                     noteId: noteId,
-                    onSuccess: onSuccess
+                    onRequestDeleteNote: onRequestDeleteNote,
+                    onAction: { _ in onSuccess?() }
                 )
             } else {
                 Image(systemName: "ellipsis.circle")
@@ -593,8 +999,6 @@ struct NoteRowView: View {
 
 #if DEBUG
 #Preview {
-    // Seed the model directly: BrowseContent has no `.task`, so the sample
-    // notes aren't overwritten by a load, and no live backend is touched.
     let model = BrowseModel()
     model.notes = [
         NoteRecord(id: NoteID(1), guid: "g1", mid: NotetypeID(1), mod: 1_700_000_300,
@@ -611,7 +1015,11 @@ struct NoteRowView: View {
     return NavigationStack {
         BrowseContent(
             model: model,
+            cardActions: CardContextMenuModel(),
             selectionState: .constant(BrowseSelectionState()),
+            onPreviewCard: { _ in },
+            onEditNote: { _ in },
+            onRequestDeleteNote: { _ in },
             onSwipeDelete: { _ in }
         )
         .navigationTitle("Browse")

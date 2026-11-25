@@ -44,6 +44,7 @@ struct ReviewContent: View {
     @State private var cardActions = CardContextMenuModel()
     @State private var confirmDeleteNote = false
     @State private var lookupHighlight = LookupHighlight()
+    @State private var whiteboard = WhiteboardState()
 
     private var keyboardActive: Bool {
         destination == nil && !confirmDeleteNote
@@ -73,6 +74,7 @@ struct ReviewContent: View {
                         showNextReviewTime: showNextReviewTime,
                         lookupHighlight: lookupHighlight,
                         shortcutsEnabled: keyboardActive,
+                        whiteboard: whiteboard,
                         lookupQuery: $destination.lookupText
                     )
                 }
@@ -101,6 +103,15 @@ struct ReviewContent: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ReviewUndoButton(session: session, shortcutEnabled: keyboardActive)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        whiteboard.toggleOpen()
+                    } label: {
+                        Image(systemName: whiteboard.isOpen ? "pencil.tip.crop.circle.fill" : "pencil.tip.crop.circle")
+                            .foregroundStyle(whiteboard.isOpen ? palette.accent : palette.textPrimary)
+                    }
+                    .accessibilityLabel(whiteboard.isOpen ? "Hide whiteboard" : "Show whiteboard")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     CardActionsMenu(
@@ -170,6 +181,13 @@ struct ReviewContent: View {
                 ReviewPositionCounter(session: session)
             }
             ReviewUndoButton(session: session, shortcutEnabled: keyboardActive)
+            Button {
+                whiteboard.toggleOpen()
+            } label: {
+                Image(systemName: whiteboard.isOpen ? "pencil.tip.crop.circle.fill" : "pencil.tip.crop.circle")
+                    .foregroundStyle(whiteboard.isOpen ? palette.accent : palette.textPrimary)
+            }
+            .accessibilityLabel(whiteboard.isOpen ? "Hide whiteboard" : "Show whiteboard")
             CardActionsMenu(
                 session: session,
                 cardActions: cardActions,
@@ -345,12 +363,13 @@ private struct ReviewUndoButton: View {
     let shortcutEnabled: Bool
 
     var body: some View {
+        let canUndo = session.canUndoAny
         Button {
-            session.undo()
+            session.undoAny()
         } label: {
             Image(systemName: "arrow.uturn.backward")
         }
-        .disabled(!session.canUndo)
+        .disabled(!canUndo)
         .keyboardShortcut(shortcutEnabled ? KeyboardShortcut("z", modifiers: .command) : nil)
         .accessibilityLabel("Undo")
     }
@@ -367,8 +386,21 @@ private struct CardActionsMenu: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
+        // Read all @Observable properties synchronously before entering Menu's
+        // escaping closure so SwiftUI/UIKit always rebuilds the UIMenu when
+        // cards load, advance, or change flag/suspend/bury/mark state.
+        let cardId = session.currentCardId
+        let note = session.currentNote
+        let templateTarget = session.currentTemplateTarget
+        let isAudioPlaying = session.isAudioPlaying
+        let currentFlag = cardActions.currentFlag
+        let isMarked = cardActions.isMarkedNote
+        let isSuspended = cardActions.isSuspended
+        let isBuried = cardActions.isBuried
+        let menuIdentity = "\(cardId?.rawValue ?? -1)-\(note?.id.rawValue ?? -1)-\(isAudioPlaying)-\(currentFlag)-\(isMarked)-\(isSuspended)-\(isBuried)"
+
         Menu {
-            if let cardId = session.currentCardId {
+            if let cardId {
                 CardFlagPicker(
                     model: cardActions,
                     cardId: cardId,
@@ -378,48 +410,51 @@ private struct CardActionsMenu: View {
 
             Section {
                 Button {
-                    destination = session.currentNote.map(ReviewDestination.editNote)
+                    cardActions.presentAfterMenuDismiss {
+                        destination = note.map(ReviewDestination.editNote)
+                    }
                 } label: {
                     Label("Edit Note", systemImage: "pencil")
                 }
-                .disabled(session.currentNote == nil)
+                .disabled(note == nil)
 
                 Button {
-                    destination = session.currentTemplateTarget.map(ReviewDestination.editTemplate)
+                    cardActions.presentAfterMenuDismiss {
+                        destination = templateTarget.map(ReviewDestination.editTemplate)
+                    }
                 } label: {
                     Label("Edit Template", systemImage: "square.and.pencil")
                 }
-                .disabled(session.currentTemplateTarget == nil)
+                .disabled(templateTarget == nil)
 
                 Button {
-                    // Empty initial query opens the popup focused for typing.
-                    // Future enhancement: forward CardWebView text-selection so
-                    // the query is pre-populated.
-                    destination = .lookup("")
+                    cardActions.presentAfterMenuDismiss {
+                        destination = .lookup("")
+                    }
                 } label: {
                     Label("Look Up", systemImage: "character.book.closed")
                 }
 
                 Button {
-                    if session.isAudioPlaying {
+                    if isAudioPlaying {
                         session.bumpStopAudioRequest()
                     } else {
                         session.bumpReplayRequest()
                     }
                 } label: {
                     Label(
-                        session.isAudioPlaying ? "Stop Audio" : "Replay Audio",
-                        systemImage: session.isAudioPlaying ? "pause.circle" : "play.circle"
+                        isAudioPlaying ? "Stop Audio" : "Replay Audio",
+                        systemImage: isAudioPlaying ? "pause.circle" : "play.circle"
                     )
                 }
-                .disabled(session.currentNote == nil)
+                .disabled(note == nil)
             }
 
-            if let cardId = session.currentCardId {
+            if let cardId {
                 CardActionSections(
                     model: cardActions,
                     cardId: cardId,
-                    noteId: session.currentNote?.id,
+                    noteId: note?.id,
                     confirmDeleteNote: $confirmDeleteNote,
                     onAction: { session.respondToCardAction($0) }
                 )
@@ -427,11 +462,13 @@ private struct CardActionsMenu: View {
         } label: {
             Image(systemName: "ellipsis.circle")
                 .foregroundStyle(
-                    cardActions.currentFlag == 0
+                    currentFlag == 0
                         ? palette.accent
-                        : CardFlag.color(cardActions.currentFlag)
+                        : CardFlag.color(currentFlag)
                 )
         }
+        .id(menuIdentity)
+        .disabled(cardId == nil)
         .accessibilityLabel("Card actions")
     }
 }

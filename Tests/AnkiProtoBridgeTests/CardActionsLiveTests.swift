@@ -106,4 +106,30 @@ import AnkiKit
             #expect(Set(restored.cards.map { $0.card.id }) == Set(siblings))
         }
     }
+
+    @Test func restoreBuriedAndSuspendedCards_setDeck_and_searchCardIds() throws {
+        try withScratchCollection("card-actions-restore-move") { backend, _ in
+            let names = try backend.invoke(.notetypeNames)
+            let basic = try #require(names.first { $0.name == "Basic" })
+            var template = try backend.invoke(.newNote(notetypeId: basic.id))
+            template.fields[0] = "front-card"
+            template.fields[1] = "back-card"
+            try backend.invoke(.addNote(template: template, deckId: DeckID(1)))
+
+            let foundCards = try backend.invoke(.searchCardIds(query: "front-card"))
+            #expect(foundCards.count == 1)
+            let cardId = try #require(foundCards.first)
+
+            try backend.invoke(.suspendCards(cardIds: [cardId]))
+            #expect(try backend.invoke(.getCard(id: cardId)).queue == -1)
+
+            try backend.invoke(.restoreBuriedAndSuspendedCards(cardIds: [cardId]))
+            #expect(try backend.invoke(.getCard(id: cardId)).queue == 0)
+
+            let deckTemplate = try backend.invoke(.newDeck)
+            let created = try backend.invoke(.addDeck(template: deckTemplate, name: "MovedDeck"))
+            try backend.invoke(.setDeck(cardIds: [cardId], deckId: created.id))
+            #expect(try backend.invoke(.getCard(id: cardId)).did == created.id)
+        }
+    }
 }

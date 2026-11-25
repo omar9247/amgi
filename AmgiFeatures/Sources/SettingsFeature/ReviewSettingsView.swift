@@ -31,11 +31,30 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.playAudioInSilentMode))
     private var playAudioInSilentMode: Bool = false
 
+    @Shared(.appStorage(WhiteboardPreferences.Keys.enabledByDefault))
+    private var whiteboardEnabledByDefault: Bool = false
+
+    @Shared(.appStorage(WhiteboardPreferences.Keys.inkStyle))
+    private var whiteboardInkStyleRaw: String = WhiteboardInkStyle.fountain.rawValue
+
+    @Shared(.appStorage(WhiteboardPreferences.Keys.stability))
+    private var whiteboardStability: Double = 0.45
+
+    @Shared(.appStorage(WhiteboardPreferences.Keys.stylusOnly))
+    private var whiteboardStylusOnly: Bool = false
+
+    @Shared(.appStorage(WhiteboardPreferences.Keys.backgroundMode))
+    private var whiteboardBackgroundRaw: String = WhiteboardBackgroundMode.transparent.rawValue
+
+    @Shared(.appStorage(WhiteboardPreferences.Keys.persistPerCard))
+    private var whiteboardPersistPerCard: Bool = false
+
     var body: some View {
         SettingsPage {
             cardDisplaySection
             answerButtonsSection
             audioSection
+            whiteboardSection
         }
         .navigationTitle("Review")
         .navigationBarTitleDisplayMode(.inline)
@@ -106,6 +125,73 @@ struct ReviewSettingsView: View {
             }
         }
     }
+
+    private var whiteboardSection: some View {
+        Group {
+            SettingsSectionHeader(title: "Whiteboard & Stylus")
+            SettingsGroup {
+                SettingsToggleRow(
+                    title: "Show whiteboard automatically",
+                    systemImage: "pencil.tip.crop.circle",
+                    tone: .accent,
+                    isOn: Binding($whiteboardEnabledByDefault)
+                )
+                SettingsSeparator()
+                SettingsPickerRow(
+                    title: "Default ink style",
+                    systemImage: "paintbrush.pointed",
+                    tone: .mature,
+                    selection: Binding($whiteboardInkStyleRaw)
+                ) {
+                    ForEach(WhiteboardInkStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                SettingsSeparator()
+                VStack(alignment: .leading, spacing: AmgiSpacing.xs) {
+                    HStack {
+                        Text("Ink stability")
+                            .amgiFont(.body)
+                            .foregroundStyle(palette.textPrimary)
+                        Spacer()
+                        Text("\(Int((whiteboardStability * 100).rounded()))%")
+                            .amgiFont(.captionBold, .monospaced)
+                            .foregroundStyle(palette.accent)
+                    }
+                    Slider(value: Binding($whiteboardStability), in: 0...1, step: 0.05)
+                }
+                .padding(.horizontal, AmgiSpacing.lg)
+                .padding(.vertical, AmgiSpacing.sm)
+                SettingsSeparator()
+                SettingsPickerRow(
+                    title: "Canvas background",
+                    systemImage: "square.grid.3x3",
+                    tone: .info,
+                    selection: Binding($whiteboardBackgroundRaw)
+                ) {
+                    ForEach(WhiteboardBackgroundMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode.rawValue)
+                    }
+                }
+                SettingsSeparator()
+                SettingsToggleRow(
+                    title: "Apple Pencil only (palm rejection)",
+                    systemImage: "applepencil",
+                    tone: .link,
+                    isOn: Binding($whiteboardStylusOnly)
+                )
+                SettingsSeparator()
+                SettingsToggleRow(
+                    title: "Save annotations per card",
+                    systemImage: "tray.and.arrow.down",
+                    tone: .review,
+                    isOn: Binding($whiteboardPersistPerCard)
+                )
+            }
+        }
+    }
+
+    @Environment(\.palette) private var palette
 }
 
 #if DEBUG

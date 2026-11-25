@@ -6,14 +6,28 @@
 //
 
 import AnkiClients
-import AnkiKit
+public import AnkiKit
 import Dependencies
 import Foundation
 public import Observation
 
+public enum CardActionSheetTarget: Identifiable, Equatable, Sendable {
+    case reschedule([CardID])
+    case changeDeck(cardIds: [CardID], currentDeckId: DeckID?)
+
+    public var id: String {
+        switch self {
+        case .reschedule(let ids):
+            "reschedule-\(ids.map(\.rawValue).map(String.init).joined(separator: ","))"
+        case .changeDeck(let ids, _):
+            "changeDeck-\(ids.map(\.rawValue).map(String.init).joined(separator: ","))"
+        }
+    }
+}
+
 /// Card-operation I/O for `CardContextMenu`. Owns the card/note/tag clients
-/// and the loaded display state (marked, current flag, undo availability)
-/// plus the error-alert state so the menu carries no `@Dependency`.
+/// and the loaded display state (marked, current flag, queue state, undo availability)
+/// plus the error-alert / sheet state so the menu carries no `@Dependency`.
 ///
 /// `cardId`/`noteId` are **not** captured — the menu is a reused leaf whose
 /// ids vary per use, so every action takes them as parameters and returns
@@ -22,14 +36,18 @@ public import Observation
 @Observable
 @MainActor
 public final class CardContextMenuModel {
-    var isMarkedNote = false
+    public var isMarkedNote = false
     public var currentFlag: UInt32 = 0
-    var canUndo = false
-    var isUndoing = false
-    var errorMessage: String?
-    var showError = false
-    var showSetDueDate = false
-    var dueDateSpec = ""
+    public var cardQueue: Int16 = 0
+    public var currentDeckId: DeckID?
+    public var canUndo = false
+    public var isUndoing = false
+    public var errorMessage: String?
+    public var showError = false
+    public var activeSheet: CardActionSheetTarget?
+
+    public var isSuspended: Bool { cardQueue == -1 }
+    public var isBuried: Bool { cardQueue == -2 || cardQueue == -3 }
 
     @ObservationIgnored @Dependency(\.cardClient) private var cardClient
     @ObservationIgnored @Dependency(\.noteClient) private var noteClient
@@ -37,34 +55,122 @@ public final class CardContextMenuModel {
 
     public init() {}
 
+    // MARK: - Deferred sheet / dialog helper
+
+    /// Yields past UIKit's `UIMenu` dismissal transition so SwiftUI sheet/alert
+    /// presentations triggered from inside a `Menu` button are never dropped.
+    public func presentAfterMenuDismiss(_ work: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(160))
+            work()
+        }
+    }
+
+    public func requestReschedule(_ cardIds: [CardID]) {
+        guard !cardIds.isEmpty else { return }
+        presentAfterMenuDismiss { [weak self] in
+            self?.activeSheet = .reschedule(cardIds)
+        }
+    }
+
+    public func requestChangeDeck(_ cardIds: [CardID]) {
+        guard !cardIds.isEmpty else { return }
+        let deckId = currentDeckId
+        presentAfterMenuDismiss { [weak self] in
+            self?.activeSheet = .changeDeck(cardIds: cardIds, currentDeckId: deckId)
+        }
+    }
+
     // MARK: - Actions (return shouldAdvance on success, nil on failure)
 
-    func suspend(_ cardId: CardID) async -> Bool? {
-        await run("Suspend failed") { try await cardClient.suspend(cardId); return true }
-    }
-
-    func bury(_ cardId: CardID) async -> Bool? {
-        await run("Bury failed") { try await cardClient.bury(cardId); return true }
-    }
-
-    func resetToNew(_ cardId: CardID) async -> Bool? {
-        await run("Forget failed") { try await cardClient.resetToNew(cardId); return true }
-    }
-
-    func setDueDate(_ cardId: CardID, _ spec: String) async -> Bool? {
-        let spec = spec.trimmingCharacters(in: .whitespaces)
-        guard !spec.isEmpty else { return nil }
-        return await run("Set due date failed") {
-            try await cardClient.setDueDate(cardId, spec)
+    public func suspend(_ cardId: CardID) async -> Bool? {
+        await run("Suspend failed") {
+            try await cardClient.suspend(cardId)
+            cardQueue = -1
             return true
         }
     }
 
-    func deleteNote(_ noteId: NoteID) async -> Bool? {
-        await run("Delete note failed") { try await noteClient.delete(noteId); return true }
+    public func unsuspendOrUnbury(_ cardId: CardID) async -> Bool? {
+        await run("Restore card failed") {
+            try await cardClient.unsuspendOrUnbury([cardId])
+            cardQueue = 0
+            return true
+        }
     }
 
-    func toggleMarked(_ noteId: NoteID) async -> Bool? {
+    public func toggleSuspend(_ cardId: CardID) async -> Bool? {
+        isSuspended ? await unsuspendOrUnbury(cardId) : await suspend(cardId)
+    }
+
+    public func bury(_ cardId: CardID) async -> Bool? {
+        await run("Bury failed") {
+            try await cardClient.bury(cardId)
+            cardQueue = -3
+            return true
+        }
+    }
+
+    public func toggleBury(_ cardId: CardID) async -> Bool? {
+        isBuried ? await unsuspendOrUnbury(cardId) : await bury(cardId)
+    }
+
+    public func resetToNew(_ cardId: CardID) async -> Bool? {
+        await run("Forget failed") {
+            try await cardClient.resetToNew(cardId)
+            cardQueue = 0
+            return true
+        }
+    }
+
+    public func setDueDate(_ cardId: CardID, _ spec: String) async -> Bool? {
+        let trimmed = spec.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            setError("Please enter a valid number of days.")
+            return nil
+        }
+        return await run("Set due date failed") {
+            try await cardClient.setDueDate(cardId, trimmed)
+            return true
+        }
+    }
+
+    /// Batch reschedule helper used by `RescheduleCardSheet`. Returns `nil` on
+    /// success or a human-readable error message on failure.
+    public func reschedule(_ cardIds: [CardID], spec: String) async -> String? {
+        let trimmed = spec.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !cardIds.isEmpty else {
+            return "Please enter a valid number of days."
+        }
+        do {
+            try await cardClient.setDueDateBatch(cardIds, trimmed)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Moves the given cards to `deckId`. Returns `nil` on success or an error
+    /// message for `ChangeDeckSheet`.
+    public func changeDeck(_ cardIds: [CardID], to deckId: DeckID) async -> String? {
+        guard !cardIds.isEmpty else { return nil }
+        do {
+            try await cardClient.setDeck(cardIds, deckId)
+            currentDeckId = deckId
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    public func deleteNote(_ noteId: NoteID) async -> Bool? {
+        await run("Delete note failed") {
+            try await noteClient.delete(noteId)
+            return true
+        }
+    }
+
+    public func toggleMarked(_ noteId: NoteID) async -> Bool? {
         await run("Mark note failed") {
             if isMarkedNote {
                 try await tagClient.removeTagFromNotes(markedTag, [noteId])
@@ -76,15 +182,15 @@ public final class CardContextMenuModel {
         }
     }
 
-    func suspendNote(_ noteId: NoteID) async -> Bool? {
+    public func suspendNote(_ noteId: NoteID) async -> Bool? {
         await noteAction(noteId, "Suspend note failed") { try await cardClient.suspend($0) }
     }
 
-    func buryNote(_ noteId: NoteID) async -> Bool? {
+    public func buryNote(_ noteId: NoteID) async -> Bool? {
         await noteAction(noteId, "Bury note failed") { try await cardClient.bury($0) }
     }
 
-    func flag(_ cardId: CardID, _ value: UInt32) async -> Bool? {
+    public func flag(_ cardId: CardID, _ value: UInt32) async -> Bool? {
         await run("Flag failed") {
             try await cardClient.flag(cardId, value)
             currentFlag = value
@@ -92,7 +198,7 @@ public final class CardContextMenuModel {
         }
     }
 
-    func undo(_ cardId: CardID) async -> Bool? {
+    public func undo(_ cardId: CardID) async -> Bool? {
         guard !isUndoing, canUndo else { return nil }
         isUndoing = true
         defer { isUndoing = false }
@@ -108,9 +214,25 @@ public final class CardContextMenuModel {
 
     // MARK: - Load
 
-    func load(cardId: CardID, noteId: NoteID?) async {
+    public func load(cardId: CardID?, noteId: NoteID?) async {
+        guard let cardId else {
+            currentFlag = 0
+            cardQueue = 0
+            currentDeckId = nil
+            isMarkedNote = false
+            canUndo = false
+            return
+        }
         await loadMarkedState(noteId)
-        currentFlag = (try? await cardClient.getCardFlags(cardId)) ?? 0
+        if let card = try? await cardClient.getCard(cardId) {
+            currentFlag = UInt32(max(0, card.flags)) & 0b111
+            cardQueue = card.queue
+            currentDeckId = card.did
+        } else {
+            currentFlag = (try? await cardClient.getCardFlags(cardId)) ?? 0
+            cardQueue = 0
+            currentDeckId = nil
+        }
         await refreshUndoAvailability()
     }
 

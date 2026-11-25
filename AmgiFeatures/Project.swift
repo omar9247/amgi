@@ -323,6 +323,7 @@ let project = AmgiModule.project(
             dependencies: [
                 .target(name: "AppCore"),
                 .target(name: "AppShared"),
+                .target(name: "BrowseFeature"),
                 .target(name: "DecksFeature"),
                 .target(name: "ReaderFeature"),
                 .target(name: "ReviewFeature"),

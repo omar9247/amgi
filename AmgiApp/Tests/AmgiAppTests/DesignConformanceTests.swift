@@ -34,6 +34,10 @@ struct DesignConformanceTests {
             "Same — template CSS parsing.",
         "ReviewFeature/CardHTMLBuilder.swift":
             "Same — template CSS parsing. Split out of CardWebView.swift.",
+        "ReviewFeature/Whiteboard/WhiteboardCanvasUIView.swift":
+            "Whiteboard UIKit ink canvas: ink strokes and grid/lined pad fills are drawing state, not app chrome.",
+        "ReviewFeature/Whiteboard/WhiteboardInkColor.swift":
+            "User-selectable pen and highlighter ink swatches, not app chrome.",
         "AppShared/ReaderThemeColor.swift":
             "Reader's own sepia/dark/light reading themes, deliberately independent of the app palette.",
         "ReaderFeature/Reader/ReaderTypographyPreferences.swift":

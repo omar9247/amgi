@@ -62,4 +62,41 @@ extension Request where Response == Void {
             decode: { _ in () }
         )
     }
+
+    /// Moves the given cards into `deckId`.
+    public static func setDeck(cardIds: [CardID], deckId: DeckID) -> Self {
+        Self(
+            serviceId: ServiceID.cards,
+            methodId: CardsMethod.setDeck,
+            encode: {
+                var proto = Anki_Cards_SetDeckRequest()
+                proto.cardIds = cardIds.map(\.rawValue)
+                proto.deckID = deckId.rawValue
+                return try proto.serializedData()
+            },
+            decode: { _ in () }
+        )
+    }
+}
+
+// MARK: - searchCardIds
+
+extension Request where Response == [CardID] {
+    /// Runs a card search and returns matching card ids in match order.
+    /// An empty query is rewritten to `deck:*` to match note search.
+    public static func searchCardIds(query: String) -> Self {
+        Self(
+            serviceId: ServiceID.search,
+            methodId: SearchMethod.searchCards,
+            encode: {
+                var proto = Anki_Search_SearchRequest()
+                proto.search = query.isEmpty ? "deck:*" : query
+                return try proto.serializedData()
+            },
+            decode: { bytes in
+                let resp = try Anki_Search_SearchResponse(serializedBytes: bytes)
+                return resp.ids.map(CardID.init(rawValue:))
+            }
+        )
+    }
 }

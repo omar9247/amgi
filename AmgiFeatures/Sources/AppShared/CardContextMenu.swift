@@ -32,9 +32,10 @@ public struct CardFlagPicker: View {
     }
 
     public var body: some View {
+        let selectedFlag = model.currentFlag & 0b111
         Section {
             Picker("Flag", selection: Binding(
-                get: { model.currentFlag & 0b111 },
+                get: { selectedFlag },
                 set: { value in
                     Task {
                         if let advance = await model.flag(cardId, value) { onAction(advance) }
@@ -57,11 +58,9 @@ public struct CardFlagPicker: View {
 /// note-scope actions are separated by section rather than by a "Note
 /// actions ▸" submenu, and the one destructive action sits alone at the end.
 ///
-/// The error alert, the delete confirmation, the due-date prompt, and the
-/// initial state load live in `.cardActionPresentations`, which the host
-/// applies *outside* the
-/// enclosing `Menu`: presentations attached to menu content never show, and
-/// a `.task` there wouldn't run until the menu is opened.
+/// The error alert, the delete confirmation, the reschedule / change-deck sheets,
+/// and the initial state load live in `.cardActionPresentations`, which the host
+/// applies *outside* the enclosing `Menu`.
 @MainActor
 public struct CardActionSections: View {
     let model: CardContextMenuModel
@@ -85,18 +84,31 @@ public struct CardActionSections: View {
     }
 
     public var body: some View {
+        let isSuspended = model.isSuspended
+        let isBuried = model.isBuried
+        let isMarked = model.isMarkedNote
+
         Section {
-            Button { act { await model.suspend(cardId) } } label: {
-                Label("Suspend Card", systemImage: "pause.circle")
+            Button { act { await model.toggleSuspend(cardId) } } label: {
+                Label(
+                    isSuspended ? "Unsuspend Card" : "Suspend Card",
+                    systemImage: isSuspended ? "play.circle" : "pause.circle"
+                )
             }
-            Button { act { await model.bury(cardId) } } label: {
-                Label("Bury Card Until Tomorrow", systemImage: "moon.zzz")
+            Button { act { await model.toggleBury(cardId) } } label: {
+                Label(
+                    isBuried ? "Unbury Card" : "Bury Card Until Tomorrow",
+                    systemImage: isBuried ? "sun.max" : "moon.zzz"
+                )
+            }
+            Button { model.requestReschedule([cardId]) } label: {
+                Label("Reschedule…", systemImage: "calendar.badge.clock")
+            }
+            Button { model.requestChangeDeck([cardId]) } label: {
+                Label("Change Deck…", systemImage: "folder")
             }
             Button { act { await model.resetToNew(cardId) } } label: {
                 Label("Forget Card", systemImage: "arrow.counterclockwise")
-            }
-            Button { model.showSetDueDate = true } label: {
-                Label("Set Due Date", systemImage: "calendar.badge.clock")
             }
         }
 
@@ -104,8 +116,8 @@ public struct CardActionSections: View {
             Section {
                 Button { act { await model.toggleMarked(noteId) } } label: {
                     Label(
-                        model.isMarkedNote ? "Unmark Note" : "Mark Note",
-                        systemImage: model.isMarkedNote ? "star.slash" : "star"
+                        isMarked ? "Unmark Note" : "Mark Note",
+                        systemImage: isMarked ? "star.slash" : "star"
                     )
                 }
                 Button { act { await model.suspendNote(noteId) } } label: {
@@ -117,7 +129,11 @@ public struct CardActionSections: View {
             }
 
             Section {
-                Button(role: .destructive) { confirmDeleteNote = true } label: {
+                Button(role: .destructive) {
+                    model.presentAfterMenuDismiss {
+                        confirmDeleteNote = true
+                    }
+                } label: {
                     Label("Delete Note", systemImage: "trash")
                 }
             }
@@ -134,14 +150,9 @@ public struct CardActionSections: View {
 // MARK: - Presentations
 
 extension View {
-    /// Error alert, delete confirmation, due-date prompt, and initial load for
-    /// `CardActionSections`/`CardFlagPicker`. Apply this to the view that
-    /// *hosts* the `Menu`, never inside the menu's content.
-    ///
-    /// Every `onAction` is required, with no default to fall back on: a host
-    /// that means "a card left study changes my list" has to say so, and a host
-    /// that means "it doesn't" says `{ _ in }` out loud. A silent default is
-    /// what made the review page ignore its own card menu.
+    /// Error alert, delete confirmation, reschedule/change-deck sheets, and
+    /// initial load for `CardActionSections`/`CardFlagPicker`. Apply this to
+    /// the view that *hosts* the `Menu`, never inside the menu's content.
     @MainActor
     public func cardActionPresentations(
         model: CardContextMenuModel,
@@ -189,22 +200,23 @@ private struct CardActionPresentations: ViewModifier {
             } message: {
                 Text("This deletes the note and all its cards. The action cannot be undone.")
             }
-            .alert("Set Due Date", isPresented: $model.showSetDueDate) {
-                TextField("Days", text: $model.dueDateSpec)
-                Button("Set") {
-                    guard let cardId else { return }
-                    Task {
-                        if let advance = await model.setDueDate(cardId, model.dueDateSpec) {
-                            onAction(advance)
-                        }
+            .sheet(item: $model.activeSheet) { target in
+                switch target {
+                case .reschedule(let ids):
+                    RescheduleCardSheet(cardIds: ids) { spec in
+                        let error = await model.reschedule(ids, spec: spec)
+                        if error == nil { onAction(true) }
+                        return error
+                    }
+                case .changeDeck(let ids, let deckId):
+                    ChangeDeckSheet(cardIds: ids, currentDeckId: deckId) { newDeckId in
+                        let error = await model.changeDeck(ids, to: newDeckId)
+                        if error == nil { onAction(true) }
+                        return error
                     }
                 }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("0 = today, 1 = tomorrow, 3-7 = a random day in that range. Append ! to also reset the interval, e.g. 3!.")
             }
             .task(id: cardId) {
-                guard let cardId else { return }
                 await model.load(cardId: cardId, noteId: noteId)
             }
     }
@@ -212,9 +224,8 @@ private struct CardActionPresentations: ViewModifier {
 
 // MARK: - Standalone button
 
-/// Self-contained `…` button wrapping the card actions — used by Browse,
-/// where the actions are the whole menu. Reviewing composes the same sections
-/// into its own toolbar menu instead, so nothing nests.
+/// Self-contained `…` button wrapping the card actions — used by Browse rows
+/// or standalone hosts.
 @MainActor
 public struct CardContextMenu: View {
     let cardId: CardID
@@ -225,8 +236,6 @@ public struct CardContextMenu: View {
     @State private var model = CardContextMenuModel()
     @State private var confirmDeleteNote = false
 
-    // Explicit: the `private` state above would otherwise make the synthesized
-    // memberwise initializer private too, and Browse constructs this cross-file.
     public init(
         cardId: CardID,
         noteId: NoteID? = nil,
@@ -261,6 +270,7 @@ public struct CardContextMenu: View {
             Image(systemName: "ellipsis.circle")
                 .amgiFont(.bodyEmphasis)
         }
+        .buttonStyle(.borderless)
         .accessibilityLabel("Card actions")
         .cardActionPresentations(
             model: model,
@@ -274,6 +284,139 @@ public struct CardContextMenu: View {
     private func forward(_ shouldAdvance: Bool) {
         onSuccess?()
         onActionSuccess?(shouldAdvance)
+    }
+}
+
+/// Lightweight `…` menu button driven by a **host-owned** `CardContextMenuModel`.
+/// Used in `List` rows (`BrowseView`) so `.cardActionPresentations(...)` lives
+/// once on the outer list instead of duplicating alerts/sheets per cell.
+@MainActor
+public struct HostedCardContextMenu: View {
+    let model: CardContextMenuModel
+    let cardId: CardID
+    var noteId: NoteID?
+    var isSuspended: Bool = false
+    var isBuried: Bool = false
+    var onEditNote: (() -> Void)?
+    var onRequestDeleteNote: ((NoteID) -> Void)?
+    var onAction: ((_ shouldAdvance: Bool) -> Void)?
+
+    public init(
+        model: CardContextMenuModel,
+        cardId: CardID,
+        noteId: NoteID? = nil,
+        isSuspended: Bool = false,
+        isBuried: Bool = false,
+        onEditNote: (() -> Void)? = nil,
+        onRequestDeleteNote: ((NoteID) -> Void)? = nil,
+        onAction: ((_ shouldAdvance: Bool) -> Void)? = nil
+    ) {
+        self.model = model
+        self.cardId = cardId
+        self.noteId = noteId
+        self.isSuspended = isSuspended
+        self.isBuried = isBuried
+        self.onEditNote = onEditNote
+        self.onRequestDeleteNote = onRequestDeleteNote
+        self.onAction = onAction
+    }
+
+    public var body: some View {
+        Menu {
+            Menu {
+                ForEach(CardFlag.all, id: \.self) { value in
+                    Button {
+                        Task { if let adv = await model.flag(cardId, value) { onAction?(adv) } }
+                    } label: {
+                        Label(CardFlag.name(value), systemImage: CardFlag.symbol(value))
+                    }
+                }
+            } label: {
+                Label("Flag", systemImage: "flag")
+            }
+            if let onEditNote {
+                Section {
+                    Button {
+                        model.presentAfterMenuDismiss(onEditNote)
+                    } label: {
+                        Label("Edit Note", systemImage: "pencil")
+                    }
+                }
+            }
+            Section {
+                Button {
+                    Task {
+                        let adv = isSuspended
+                            ? await model.unsuspendOrUnbury(cardId)
+                            : await model.suspend(cardId)
+                        if let adv { onAction?(adv) }
+                    }
+                } label: {
+                    Label(
+                        isSuspended ? "Unsuspend Card" : "Suspend Card",
+                        systemImage: isSuspended ? "play.circle" : "pause.circle"
+                    )
+                }
+                Button {
+                    Task {
+                        let adv = isBuried
+                            ? await model.unsuspendOrUnbury(cardId)
+                            : await model.bury(cardId)
+                        if let adv { onAction?(adv) }
+                    }
+                } label: {
+                    Label(
+                        isBuried ? "Unbury Card" : "Bury Card",
+                        systemImage: isBuried ? "sun.max" : "moon.zzz"
+                    )
+                }
+                Button {
+                    model.requestReschedule([cardId])
+                } label: {
+                    Label("Reschedule…", systemImage: "calendar.badge.clock")
+                }
+                Button {
+                    model.requestChangeDeck([cardId])
+                } label: {
+                    Label("Change Deck…", systemImage: "folder")
+                }
+                Button {
+                    Task { if let adv = await model.resetToNew(cardId) { onAction?(adv) } }
+                } label: {
+                    Label("Forget Card", systemImage: "arrow.counterclockwise")
+                }
+            }
+            if let noteId {
+                Section {
+                    Button {
+                        Task { if let adv = await model.suspendNote(noteId) { onAction?(adv) } }
+                    } label: {
+                        Label("Suspend Note", systemImage: "pause.circle.fill")
+                    }
+                    Button {
+                        Task { if let adv = await model.buryNote(noteId) { onAction?(adv) } }
+                    } label: {
+                        Label("Bury Note", systemImage: "moon.zzz.fill")
+                    }
+                }
+                if let onRequestDeleteNote {
+                    Section {
+                        Button(role: .destructive) {
+                            model.presentAfterMenuDismiss {
+                                onRequestDeleteNote(noteId)
+                            }
+                        } label: {
+                            Label("Delete Note", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .amgiFont(.bodyEmphasis)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Card actions")
     }
 }
 

@@ -19,12 +19,16 @@ struct DeckDetailView: View {
     let deck: DeckInfo
 
     @Environment(\.palette) private var palette
+    @Environment(\.cardPreview) private var cardPreview
     @Dependency(\.collectionStore) private var store
+    @Dependency(\.cardClient) private var cardClient
     @State private var model: DeckDetailModel
     @State private var destination: DeckDetailDestination?
     @State private var newSubdeckName = ""
     @State private var limitDelta = ""
     @State private var pendingSubdeck: DeckInfo?
+    @State private var showBrowseDeck = false
+    @State private var previewRequest: CardPreviewRequest?
 
     init(deck: DeckInfo) {
         self.deck = deck
@@ -121,6 +125,21 @@ struct DeckDetailView: View {
         .navigationDestination(item: $pendingSubdeck) { sub in
             DeckDetailView(deck: sub)
         }
+        .navigationDestination(isPresented: $showBrowseDeck) {
+            BrowseView(initialDeck: deck)
+        }
+        .fullScreenCover(item: $previewRequest) { request in
+            if let cardPreview {
+                cardPreview.previewView(
+                    request: request,
+                    onCollectionChanged: { store.invalidateAll() },
+                    onDismiss: {
+                        previewRequest = nil
+                        store.invalidateAll()
+                    }
+                )
+            }
+        }
     }
 
     // MARK: - Action dispatch
@@ -129,6 +148,20 @@ struct DeckDetailView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Menu {
+                Section {
+                    Button {
+                        Task { await openDeckPreview() }
+                    } label: {
+                        Label("Preview Cards…", systemImage: "eye")
+                    }
+                    .disabled(model.isEmpty)
+
+                    Button {
+                        showBrowseDeck = true
+                    } label: {
+                        Label("Browse Cards…", systemImage: "rectangle.grid.1x2")
+                    }
+                }
                 Section {
                     Button {
                         destination = .sheet(.addNote)
@@ -288,6 +321,19 @@ private extension DeckDetailView {
             destination = .sheet(.exportFile(url))
         case .failure(let msg):
             destination = .alert(.error(title: "Couldn't export \"\(shortTitle)\"", message: msg))
+        }
+    }
+
+    func openDeckPreview() async {
+        do {
+            let ids = try await cardClient.searchCards(DeckSearch.term(deck.name), nil)
+            guard !ids.isEmpty else {
+                model.showFeedback("No cards in this deck")
+                return
+            }
+            previewRequest = CardPreviewRequest(cardIds: ids, initialIndex: 0, title: shortTitle)
+        } catch {
+            destination = .alert(.error(title: "Couldn't preview \"\(shortTitle)\"", message: error.localizedDescription))
         }
     }
 

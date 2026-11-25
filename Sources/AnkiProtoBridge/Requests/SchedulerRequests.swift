@@ -100,6 +100,20 @@ extension Request where Response == Void {
         buryOrSuspend(cardIds: cardIds, mode: .buryUser)
     }
 
+    /// Unsuspends and/or unburies the given cards in one backend call.
+    public static func restoreBuriedAndSuspendedCards(cardIds: [CardID]) -> Self {
+        Self(
+            serviceId: ServiceID.scheduler,
+            methodId: SchedulerMethod.restoreBuriedAndSuspendedCards,
+            encode: {
+                var proto = Anki_Cards_CardIds()
+                proto.cids = cardIds.map(\.rawValue)
+                return try proto.serializedData()
+            },
+            decode: { _ in () }
+        )
+    }
+
     private static func buryOrSuspend(
         cardIds: [CardID],
         mode: Anki_Scheduler_BuryOrSuspendCardsRequest.Mode

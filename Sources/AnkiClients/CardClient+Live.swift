@@ -22,6 +22,16 @@ extension CardClient: DependencyKey {
         @Dependency(\.decksService) var decks
 
         return Self(
+            getCard: { cardId in
+                try await backend.invoke(.getCard(id: cardId))
+            },
+            searchCards: { query, limit in
+                let ids = try await backend.invoke(.searchCardIds(query: query))
+                if let limit {
+                    return Array(ids.prefix(limit))
+                }
+                return ids
+            },
             fetchDue: { deckId in
                 try await backendOffload {
                     do {
@@ -61,17 +71,41 @@ extension CardClient: DependencyKey {
             suspend: { cardId in
                 try await backend.invoke(.suspendCards(cardIds: [cardId]))
             },
+            suspendBatch: { cardIds in
+                guard !cardIds.isEmpty else { return }
+                try await backend.invoke(.suspendCards(cardIds: cardIds))
+            },
             bury: { cardId in
                 try await backend.invoke(.buryCards(cardIds: [cardId]))
             },
+            buryBatch: { cardIds in
+                guard !cardIds.isEmpty else { return }
+                try await backend.invoke(.buryCards(cardIds: cardIds))
+            },
+            unsuspendOrUnbury: { cardIds in
+                guard !cardIds.isEmpty else { return }
+                try await backend.invoke(.restoreBuriedAndSuspendedCards(cardIds: cardIds))
+            },
             flag: { cardId, value in
                 try await backend.invoke(.setFlag(cardIds: [cardId], flag: value))
+            },
+            flagBatch: { cardIds, value in
+                guard !cardIds.isEmpty else { return }
+                try await backend.invoke(.setFlag(cardIds: cardIds, flag: value))
             },
             resetToNew: { cardId in
                 try await backend.invoke(.scheduleCardsAsNew(cardIds: [cardId], log: true))
             },
             setDueDate: { cardId, days in
                 try await backend.invoke(.setDueDate(cardIds: [cardId], days: days))
+            },
+            setDueDateBatch: { cardIds, days in
+                guard !cardIds.isEmpty else { return }
+                try await backend.invoke(.setDueDate(cardIds: cardIds, days: days))
+            },
+            setDeck: { cardIds, deckId in
+                guard !cardIds.isEmpty else { return }
+                try await backend.invoke(.setDeck(cardIds: cardIds, deckId: deckId))
             },
             undoLast: {
                 try await backend.invoke(.undoLastAction)

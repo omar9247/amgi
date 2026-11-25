@@ -7,6 +7,7 @@
 
 import AppCore
 import AnkiKit
+import BrowseFeature
 import DecksFeature
 import ReaderFeature
 import SettingsFeature
@@ -35,7 +36,7 @@ struct MainTabView: View {
     @Environment(\.startSync) private var startSync
 
     private enum MainTab: Hashable {
-        case library, read, study, stats, settings
+        case library, browse, read, study, stats, settings
     }
 
     @State private var selection: MainTab = .library
@@ -52,7 +53,13 @@ struct MainTabView: View {
                     )
                 }
             }
-            // 2. Reader and 3. Study both live in ReaderFeature.
+            // 2. Card & Note Browser
+            Tab("Browse", systemImage: "rectangle.grid.1x2", value: MainTab.browse) {
+                NavigationStack {
+                    BrowseView()
+                }
+            }
+            // 3. Reader and 4. Study both live in ReaderFeature.
             if showReaderTab {
                 Tab("Read", systemImage: "book", value: MainTab.read) {
                     NavigationStack {

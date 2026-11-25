@@ -55,6 +55,7 @@ struct DispatchTableTests {
         // backend_cards_service (5)
         Method(ServiceID.cards, CardsMethod.getCard, "get_card"),
         Method(ServiceID.cards, CardsMethod.removeCards, "remove_cards"),
+        Method(ServiceID.cards, CardsMethod.setDeck, "set_deck"),
         Method(ServiceID.cards, CardsMethod.setFlag, "set_flag"),
         // backend_decks_service (7)
         Method(ServiceID.decks, DecksMethod.newDeck, "new_deck"),
@@ -73,6 +74,7 @@ struct DispatchTableTests {
         Method(ServiceID.scheduler, SchedulerMethod.getQueuedCards, "get_queued_cards"),
         Method(ServiceID.scheduler, SchedulerMethod.answerCard, "answer_card"),
         Method(ServiceID.scheduler, SchedulerMethod.extendLimits, "extend_limits"),
+        Method(ServiceID.scheduler, SchedulerMethod.restoreBuriedAndSuspendedCards, "restore_buried_and_suspended_cards"),
         Method(ServiceID.scheduler, SchedulerMethod.buryOrSuspendCards, "bury_or_suspend_cards"),
         Method(ServiceID.scheduler, SchedulerMethod.emptyFilteredDeck, "empty_filtered_deck"),
         Method(ServiceID.scheduler, SchedulerMethod.rebuildFilteredDeck, "rebuild_filtered_deck"),

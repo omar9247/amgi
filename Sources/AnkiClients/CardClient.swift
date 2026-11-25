@@ -11,13 +11,21 @@ import DependenciesMacros
 
 @DependencyClient
 public struct CardClient: Sendable {
+    public var getCard: @Sendable (_ cardId: CardID) async throws -> CardRecord
+    public var searchCards: @Sendable (_ query: String, _ limit: Int?) async throws -> [CardID]
     public var fetchDue: @Sendable (_ deckId: DeckID) async throws -> [CardRecord]
     public var fetchByNote: @Sendable (_ noteId: NoteID) async throws -> [CardRecord]
     public var suspend: @Sendable (_ cardId: CardID) async throws -> Void
+    public var suspendBatch: @Sendable (_ cardIds: [CardID]) async throws -> Void
     public var bury: @Sendable (_ cardId: CardID) async throws -> Void
+    public var buryBatch: @Sendable (_ cardIds: [CardID]) async throws -> Void
+    public var unsuspendOrUnbury: @Sendable (_ cardIds: [CardID]) async throws -> Void
     public var flag: @Sendable (_ cardId: CardID, _ value: UInt32) async throws -> Void
+    public var flagBatch: @Sendable (_ cardIds: [CardID], _ value: UInt32) async throws -> Void
     public var resetToNew: @Sendable (_ cardId: CardID) async throws -> Void
     public var setDueDate: @Sendable (_ cardId: CardID, _ days: String) async throws -> Void
+    public var setDueDateBatch: @Sendable (_ cardIds: [CardID], _ days: String) async throws -> Void
+    public var setDeck: @Sendable (_ cardIds: [CardID], _ deckId: DeckID) async throws -> Void
     public var undoLast: @Sendable () async throws -> Void
     public var getCardFlags: @Sendable (_ cardId: CardID) async throws -> UInt32
     public var hasUndoableAction: @Sendable () async throws -> Bool

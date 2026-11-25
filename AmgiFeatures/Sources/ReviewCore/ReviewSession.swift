@@ -50,6 +50,8 @@ public final class ReviewSession {
     public private(set) var deckName: String = ""
     public private(set) var isFinished: Bool = false
     public private(set) var canUndo: Bool = false
+    public private(set) var canUndoCardAction: Bool = false
+    public var canUndoAny: Bool { canUndo || canUndoCardAction }
     public private(set) var nextIntervals: [Rating: String] = [:]
     public private(set) var replayRequestID: Int = 0       // plumbed; consumer is PR 1b
     public private(set) var stopAudioRequestID: Int = 0    // plumbed; consumer is PR 1b
@@ -264,6 +266,7 @@ public final class ReviewSession {
                     sessionStats.totalTimeMs += Int(timeSpent)
                     lastRating = rating
                     canUndo = true
+                    canUndoCardAction = false
 
                     applyFreshGather(queue)
                     await advanceToNextCard(notes: notes, notetypes: notetypes, notetypesClient: notetypesClient, cardRendering: cardRendering)
@@ -301,6 +304,7 @@ public final class ReviewSession {
                 }.value
 
                 canUndo = false
+                canUndoCardAction = false
                 undoneCount += 1
                 // Roll back session stats only if the operation we just
                 // undid was actually an answer. undoLast() undoes the last
@@ -323,7 +327,48 @@ public final class ReviewSession {
         }
     }
 
-    // MARK: - Re-queue
+    /// Undoes either the last answered review (rolling back session stats) or
+    /// the last card-menu collection operation (suspend, bury, forget, reschedule).
+    public func undoAny() {
+        if canUndo {
+            undo()
+        } else if canUndoCardAction {
+            undoCardAction()
+        }
+    }
+
+    public func undoCardAction() {
+        guard canUndoCardAction, !isAdvancing else { return }
+        isAdvancing = true
+        invalidatePrefetch()
+
+        let collection = self.collection
+        let scheduler = self.scheduler
+        let notes = self.notes
+        let notetypes = self.notetypes
+        let notetypesClient = self.notetypesClient
+        let cardRendering = self.cardRendering
+
+        Task {
+            defer { finishTransition() }
+            do {
+                let queue = try await Task.detached {
+                    try collection.undoLast()
+                    return try scheduler.getQueuedCards(queueFetchLimit)
+                }.value
+
+                canUndoCardAction = false
+                undoneCount += 1
+                isFinished = false
+                studyNotice = nil
+
+                applyFreshGather(queue)
+                await advanceToNextCard(notes: notes, notetypes: notetypes, notetypesClient: notetypesClient, cardRendering: cardRendering)
+            } catch {
+                Log.review.error("Undo card action failed: \(error)")
+            }
+        }
+    }
 
     /// A re-queue's claim about what left study, and the cue it warrants.
     /// How that claim is put into words is the study screen's business; this is
@@ -400,6 +445,7 @@ public final class ReviewSession {
                 }.value
 
                 requeueError = nil
+                canUndoCardAction = true
                 applyFreshGather(queue)
 
                 let gone = queuedIds.subtracting(queue.cards.map { $0.card.id }).count

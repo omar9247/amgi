@@ -36,6 +36,7 @@ struct ReviewCardArea: View {
     let showNextReviewTime: Bool
     let lookupHighlight: LookupHighlight
     let shortcutsEnabled: Bool
+    let whiteboard: WhiteboardState
     @Binding var lookupQuery: String?
 
     @Environment(\.palette) private var palette
@@ -82,11 +83,16 @@ struct ReviewCardArea: View {
             )
             .padding(.horizontal)
 
-            cardFlipRegion
+            WhiteboardOverlayView(state: whiteboard) {
+                cardFlipRegion
+            }
             .onChange(of: session.stopAudioRequestID) { _, _ in
                 if isNativeMode { nativeAudioPlayer.stop() }
             }
-            .onChange(of: session.currentCardId) { _, _ in playNativeAudio() }
+            .onChange(of: session.currentCardId, initial: true) { _, newId in
+                whiteboard.switchToCard(newId)
+                playNativeAudio()
+            }
             .onChange(of: session.showAnswer) { _, shown in
                 if shown { playNativeAudio() }
             }
