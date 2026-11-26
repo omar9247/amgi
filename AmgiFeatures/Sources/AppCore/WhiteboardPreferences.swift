@@ -5,8 +5,6 @@
 //  Created by Amgi Contributors.
 //
 
-public import Foundation
-
 public enum WhiteboardInkStyle: String, CaseIterable, Identifiable, Codable, Sendable {
     case fountain
     case ballpoint

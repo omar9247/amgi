@@ -10,9 +10,10 @@ import AmgiCardWeb
 import Theme
 import UI
 import AppCore
-import AppShared
+package import AppShared
 import AnkiClients
-package import AnkiKit
+import AnkiKit
+import CasePaths
 import Dependencies
 import BrowseFeature
 import TemplatesFeature
@@ -178,6 +179,7 @@ package struct CardPreviewerView: View {
                     )
                 }
             }
+            #if canImport(UIKit)
             .toolbarBackground(
                 autoMatchCardBackground ? session.cardChromeColor : Color.clear,
                 for: .navigationBar
@@ -190,6 +192,7 @@ package struct CardPreviewerView: View {
                 autoMatchCardBackground && session.cardChromeIsDark ? .dark : .light,
                 for: .navigationBar
             )
+            #endif
         }
         .task {
             ReviewAudioSession.apply(playInSilent: playAudioInSilentMode)

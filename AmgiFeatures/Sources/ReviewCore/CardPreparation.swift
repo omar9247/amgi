@@ -91,9 +91,27 @@ func prepareCard(
     notetypesClient: NotetypesClient,
     notetypeCache: [NotetypeID: Notetype]
 ) async -> PreparedCard {
+    await prepareCard(
+        for: queued.card,
+        notes: notes,
+        notetypes: notetypes,
+        cardRendering: cardRendering,
+        notetypesClient: notetypesClient,
+        notetypeCache: notetypeCache
+    )
+}
+
+func prepareCard(
+    for card: CardRecord,
+    notes: NotesService,
+    notetypes: NotetypesService,
+    cardRendering: CardRenderingService,
+    notetypesClient: NotetypesClient,
+    notetypeCache: [NotetypeID: Notetype]
+) async -> PreparedCard {
     let note: NoteRecord?
     do {
-        note = try notes.getNote(queued.card.nid)
+        note = try notes.getNote(card.nid)
     } catch {
         Log.review.error("getNote failed: \(error)")
         note = nil
@@ -111,22 +129,22 @@ func prepareCard(
             fetchedNotetype = try? await notetypesClient.get(mid)
             notetype = fetchedNotetype
         }
-        let ord = Int(queued.card.ord)
+        let ord = Int(card.ord)
         if let notetype, notetype.templates.indices.contains(ord) {
             templateName = notetype.templates[ord].name
         }
     }
 
     do {
-        let rendered = try cardRendering.renderCard(queued.card.id)
+        let rendered = try cardRendering.renderCard(card.id)
         let typedState = resolveTypedAnswerState(
-            for: queued,
+            for: card,
             frontHTML: rendered.frontHTML,
             notes: notes,
             notetypes: notetypes,
             cardRendering: cardRendering
         )
-        let prefs = currentRenderEnginePreferences(mid: note?.mid, ord: Int(queued.card.ord))
+        let prefs = currentRenderEnginePreferences(mid: note?.mid, ord: Int(card.ord))
         let resolution = resolveRenderMode(
             renderedFront: rendered.frontHTML,
             renderedBack: rendered.backHTML,
@@ -140,7 +158,7 @@ func prepareCard(
                 renderedBack: rendered.backHTML,
                 css: rendered.cardCSS
             ) ?? "engine preference (global: \(prefs.global.rawValue), override: \(prefs.override?.rawValue ?? "none"))"
-            Log.review.debug("card \(queued.card.id.rawValue) → HTML: \(issue)")
+            Log.review.debug("card \(card.id.rawValue) → HTML: \(issue)")
         }
         return PreparedCard(
             note: note,
@@ -155,7 +173,7 @@ func prepareCard(
             notetype: fetchedNotetype
         )
     } catch {
-        Log.review.error("Render failed for card \(queued.card.id.rawValue): \(error)")
+        Log.review.error("Render failed for card \(card.id.rawValue): \(error)")
         return PreparedCard(
             note: note,
             renderedFrontHTML: "<p>Error rendering card</p>",

@@ -8,7 +8,7 @@
 import OSLog
 public import SwiftUI
 import AppCore
-public import AmgiCardWeb
+import AmgiCardWeb
 import AnkiClients
 public import AnkiKit
 import AnkiServices
@@ -190,18 +190,14 @@ public final class CardPreviewSession {
     }
 
     public func removeCurrentNoteCards() {
-        guard let nid = currentNote?.id else { return }
-        // Remove current card (and note if needed, refreshed safely)
-        if let cid = currentCardId {
-            cardIds.removeAll { $0 == cid }
-        }
+        guard let cid = currentCardId else { return }
+        cardIds.removeAll { $0 == cid }
         if cardIds.isEmpty {
             currentCard = nil
             currentNote = nil
             return
         }
         currentIndex = min(currentIndex, cardIds.count - 1)
-        let _ = nid
         loadCurrent()
     }
 
@@ -234,20 +230,9 @@ public final class CardPreviewSession {
                 let card = try await cardClient.getCard(id)
                 guard !Task.isCancelled else { return }
 
-                let queued = QueuedReviewCard(
-                    card: card,
-                    states: ReviewSchedulingStates(
-                        current: SchedulingStateToken(Data()),
-                        again: SchedulingStateToken(Data()),
-                        hard: SchedulingStateToken(Data()),
-                        good: SchedulingStateToken(Data()),
-                        easy: SchedulingStateToken(Data())
-                    ),
-                    nextIntervals: [:]
-                )
                 let prepared = await Task.detached {
                     await prepareCard(
-                        for: queued,
+                        for: card,
                         notes: notes,
                         notetypes: notetypes,
                         cardRendering: cardRendering,

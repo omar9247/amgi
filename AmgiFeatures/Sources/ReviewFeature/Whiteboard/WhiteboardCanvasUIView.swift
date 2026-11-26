@@ -7,6 +7,8 @@
 
 #if canImport(UIKit)
 import AppCore
+import CoreGraphics
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -106,7 +108,7 @@ final class WhiteboardCanvasUIView: UIView, UIPencilInteractionDelegate {
 
     // MARK: - UIPencilInteractionDelegate (Apple Pencil double-tap)
 
-    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+    func pencilInteraction(_ interaction: UIPencilInteraction, didTap tap: UIPencilInteraction.Tap) {
         state?.isEraserSelected.toggle()
     }
 

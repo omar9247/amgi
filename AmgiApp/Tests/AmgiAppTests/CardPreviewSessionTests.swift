@@ -8,6 +8,7 @@
 import Testing
 import Dependencies
 import Foundation
+import AnkiClients
 import AnkiKit
 import AnkiServices
 @testable import ReviewCore
@@ -43,7 +44,21 @@ struct CardPreviewSessionTests {
                 id == NoteID(100) ? note1 : note2
             }
             $0.notetypesClient.get = { _ in
-                Notetype(id: NotetypeID(1), name: "Basic", fields: ["Front", "Back"], templates: [Notetype.Template(name: "Card 1", qfmt: "{{Front}}", afmt: "{{Back}}")])
+                Notetype(
+                    id: NotetypeID(1),
+                    name: "Basic",
+                    fields: [
+                        Notetype.Field(ord: 0, name: "Front"),
+                        Notetype.Field(ord: 1, name: "Back"),
+                    ],
+                    templates: [
+                        Notetype.Template(
+                            ord: 0,
+                            name: "Card 1",
+                            config: Notetype.Template.Config(qFormat: "{{Front}}", aFormat: "{{Back}}")
+                        ),
+                    ]
+                )
             }
             $0.cardRenderingService.renderCard = { id in
                 id == CardID(10)

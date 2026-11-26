@@ -44,7 +44,7 @@ enum BrowseCardStateFilter: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct BrowseCardItem: Identifiable, Sendable, Equatable {
+struct BrowseCardItem: Identifiable, Sendable {
     let id: CardID
     var card: CardRecord?
     var note: NoteRecord?

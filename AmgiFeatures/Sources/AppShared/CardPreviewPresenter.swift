@@ -5,6 +5,7 @@
 //  Created by Amgi Contributors.
 //
 
+public import Foundation
 public import SwiftUI
 public import AnkiKit
 

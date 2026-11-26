@@ -26,15 +26,31 @@ func resolveTypedAnswerState(
     notetypes: NotetypesService,
     cardRendering: CardRenderingService
 ) -> TypedAnswerState? {
+    resolveTypedAnswerState(
+        for: queued.card,
+        frontHTML: frontHTML,
+        notes: notes,
+        notetypes: notetypes,
+        cardRendering: cardRendering
+    )
+}
+
+func resolveTypedAnswerState(
+    for card: CardRecord,
+    frontHTML: String,
+    notes: NotesService,
+    notetypes: NotetypesService,
+    cardRendering: CardRenderingService
+) -> TypedAnswerState? {
     guard let placeholder = firstTypedAnswerPlaceholder(
         in: frontHTML,
-        cardOrdinal: UInt32(max(0, queued.card.ord))
+        cardOrdinal: UInt32(max(0, card.ord))
     ) else {
         return nil
     }
 
     do {
-        let noteRecord = try notes.getNote(queued.card.nid)
+        let noteRecord = try notes.getNote(card.nid)
 
         // Fetch per-field font/size config via service (keeps backend access inside AnkiServices).
         let fields = try notetypes.getNotetypeFields(noteRecord.mid)
@@ -70,7 +86,7 @@ func resolveTypedAnswerState(
             fontSize: field.fontSize
         )
     } catch {
-        Log.review.error("Typed answer resolution failed for card \(queued.card.id.rawValue): \(error)")
+        Log.review.error("Typed answer resolution failed for card \(card.id.rawValue): \(error)")
         return nil
     }
 }

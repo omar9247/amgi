@@ -6,6 +6,7 @@
 //
 
 import AppCore
+import Foundation
 import SwiftUI
 import Theme
 
