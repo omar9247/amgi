@@ -26,7 +26,7 @@ struct ReviewKeyboardAndGamepadShortcuts: ViewModifier {
     let gamepadShortcutsActive: Bool
     @Binding var destination: ReviewDestination?
     @Binding var confirmDeleteNote: Bool
-    let onDismiss: @MainActor () -> Void
+    let onDismiss: () -> Void
 
     @State private var gamepadToken: GameControllerManager.HandlerToken?
 
@@ -78,26 +78,28 @@ struct ReviewKeyboardAndGamepadShortcuts: ViewModifier {
             shortcutButton("Mark Note", key: "*") { perform(.toggleMark) }
             shortcutButton("Bury Card", key: "-") { perform(.buryCard) }
             shortcutButton("Bury Note", key: "=") { perform(.buryNote) }
-            shortcutButton("Suspend Card", key: "@") { perform(.suspendCard) }
-            shortcutButton("Suspend Note", key: "!") { perform(.suspendNote) }
         }
         Group {
+            shortcutButton("Suspend Card", key: "@") { perform(.suspendCard) }
+            shortcutButton("Suspend Note", key: "!") { perform(.suspendNote) }
             shortcutButton("Scroll Card Down", key: .downArrow) { perform(.scrollDown) }
             shortcutButton("Scroll Card Down (J)", key: "j") { perform(.scrollDown) }
             shortcutButton("Scroll Card Up", key: .upArrow) { perform(.scrollUp) }
             shortcutButton("Scroll Card Up (K)", key: "k") { perform(.scrollUp) }
             shortcutButton("Toggle Whiteboard", key: "w") { perform(.toggleWhiteboard) }
             shortcutButton("Clear Whiteboard", key: "w", modifiers: .shift) { perform(.clearWhiteboard) }
-            shortcutButton("Close Review", key: "d") { perform(.closeReview) }
-            shortcutButton("Close Review (Escape)", key: .escape) { perform(.closeReview) }
         }
         Group {
+            shortcutButton("Close Review", key: "d") { perform(.closeReview) }
+            shortcutButton("Close Review (Escape)", key: .escape) { perform(.closeReview) }
             shortcutButton("Flag Red", key: "1", modifiers: .command) { perform(.flagRed) }
             shortcutButton("Flag Orange", key: "2", modifiers: .command) { perform(.flagOrange) }
             shortcutButton("Flag Green", key: "3", modifiers: .command) { perform(.flagGreen) }
             shortcutButton("Flag Blue", key: "4", modifiers: .command) { perform(.flagBlue) }
             shortcutButton("Flag Pink", key: "5", modifiers: .command) { perform(.flagPink) }
             shortcutButton("Flag Cyan", key: "6", modifiers: .command) { perform(.flagCyan) }
+        }
+        Group {
             shortcutButton("Flag Purple", key: "7", modifiers: .command) { perform(.flagPurple) }
             shortcutButton("Clear Flag", key: "0", modifiers: .command) { perform(.clearFlag) }
             shortcutButton("Reschedule Card", key: "d", modifiers: [.command, .shift]) { perform(.reschedule) }

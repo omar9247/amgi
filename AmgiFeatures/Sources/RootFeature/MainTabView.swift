@@ -105,30 +105,33 @@ struct MainTabView: View {
             }
         }
         .background {
-            Group {
-                Button("Decks") { selection = .library }
-                    .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("1", modifiers: .command) : nil)
-                Button("Browse") { selection = .browse }
-                    .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("2", modifiers: .command) : nil)
-                Button("Study") { selection = .study }
-                    .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("3", modifiers: .command) : nil)
-                Button("Stats") { selection = .stats }
-                    .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("4", modifiers: .command) : nil)
-                Button("Settings") { selection = .settings }
-                    .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut(",", modifiers: .command) : nil)
-                Button("Sync") { startSync() }
-                    .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("y", modifiers: .command) : nil)
-
-                Button("Decks (D)") { selection = .library }
-                    .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("d", modifiers: []) : nil)
-                Button("Browse (B)") { selection = .browse }
-                    .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("b", modifiers: []) : nil)
-                Button("Study (S)") { selection = .study }
-                    .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("s", modifiers: []) : nil)
-                Button("Add Note") { showAddNoteSheet = true }
-                    .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("a", modifiers: []) : nil)
-                Button("Sync (Y)") { startSync() }
-                    .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("y", modifiers: []) : nil)
+            ZStack {
+                Group {
+                    Button("Decks") { selection = .library }
+                        .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("1", modifiers: .command) : nil)
+                    Button("Browse") { selection = .browse }
+                        .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("2", modifiers: .command) : nil)
+                    Button("Study") { selection = .study }
+                        .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("3", modifiers: .command) : nil)
+                    Button("Stats") { selection = .stats }
+                        .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("4", modifiers: .command) : nil)
+                    Button("Settings") { selection = .settings }
+                        .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut(",", modifiers: .command) : nil)
+                    Button("Sync") { startSync() }
+                        .keyboardShortcut(globalCommandShortcutsActive ? KeyboardShortcut("y", modifiers: .command) : nil)
+                }
+                Group {
+                    Button("Decks (D)") { selection = .library }
+                        .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("d", modifiers: []) : nil)
+                    Button("Browse (B)") { selection = .browse }
+                        .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("b", modifiers: []) : nil)
+                    Button("Study (S)") { selection = .study }
+                        .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("s", modifiers: []) : nil)
+                    Button("Add Note") { showAddNoteSheet = true }
+                        .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("a", modifiers: []) : nil)
+                    Button("Sync (Y)") { startSync() }
+                        .keyboardShortcut(singleKeyGlobalShortcutsActive ? KeyboardShortcut("y", modifiers: []) : nil)
+                }
             }
             .opacity(0)
             .frame(width: 0, height: 0)

@@ -59,7 +59,7 @@ public final class GameControllerManager {
     public private(set) var bindings: [GamepadInput: ReviewShortcutAction]
 
     @ObservationIgnored private var handlers: [HandlerEntry] = []
-    @ObservationIgnored private var observerTokens: [NSObjectProtocol] = []
+    @ObservationIgnored private var observerTokens: [any NSObjectProtocol] = []
     @ObservationIgnored private var lastPressTimes: [GamepadInput: ContinuousClock.Instant] = [:]
     @ObservationIgnored private var currentStickY: Float = 0
     @ObservationIgnored private var thumbstickScrollTask: Task<Void, Never>?

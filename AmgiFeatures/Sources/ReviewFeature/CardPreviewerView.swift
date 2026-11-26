@@ -546,16 +546,18 @@ package struct CardPreviewerView: View {
             previewShortcutButton("Edit Note", key: "e") { performShortcutAction(.editNote) }
             previewShortcutButton("Replay Audio", key: "r") { performShortcutAction(.replayAudio) }
             previewShortcutButton("Mark Note", key: "*") { performShortcutAction(.toggleMark) }
+        }
+        Group {
             previewShortcutButton("Bury Card", key: "-") { performShortcutAction(.buryCard) }
             previewShortcutButton("Suspend Card", key: "@") { performShortcutAction(.suspendCard) }
             previewShortcutButton("Toggle Whiteboard", key: "w") { performShortcutAction(.toggleWhiteboard) }
             previewShortcutButton("Clear Whiteboard", key: "w", modifiers: .shift) { performShortcutAction(.clearWhiteboard) }
             previewShortcutButton("Close Viewer", key: .escape) { performShortcutAction(.closeReview) }
-        }
-        Group {
             previewShortcutButton("Flag Red", key: "1", modifiers: .command) { performShortcutAction(.flagRed) }
             previewShortcutButton("Flag Orange", key: "2", modifiers: .command) { performShortcutAction(.flagOrange) }
             previewShortcutButton("Flag Green", key: "3", modifiers: .command) { performShortcutAction(.flagGreen) }
+        }
+        Group {
             previewShortcutButton("Flag Blue", key: "4", modifiers: .command) { performShortcutAction(.flagBlue) }
             previewShortcutButton("Flag Pink", key: "5", modifiers: .command) { performShortcutAction(.flagPink) }
             previewShortcutButton("Flag Cyan", key: "6", modifiers: .command) { performShortcutAction(.flagCyan) }
