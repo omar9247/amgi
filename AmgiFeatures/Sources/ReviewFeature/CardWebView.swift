@@ -36,6 +36,8 @@ struct CardWebView {
     let prefetchHTML: String?
     let contentAlignment: CardWebViewContentAlignment
     let bottomContentInset: CGFloat
+    let scrollRequestID: Int
+    let scrollDelta: CGFloat
     let onAudioStateChange: ((Bool) -> Void)?
     let onCardBackgroundColorChange: ((Color, Bool) -> Void)?
     let onLookupRequested: ((String?, String?, CGPoint) -> Void)?
@@ -58,6 +60,8 @@ struct CardWebView {
         prefetchHTML: String? = nil,
         contentAlignment: CardWebViewContentAlignment = .center,
         bottomContentInset: CGFloat = 0,
+        scrollRequestID: Int = 0,
+        scrollDelta: CGFloat = 0,
         onAudioStateChange: ((Bool) -> Void)? = nil,
         onCardBackgroundColorChange: ((Color, Bool) -> Void)? = nil,
         onLookupRequested: ((String?, String?, CGPoint) -> Void)? = nil,
@@ -79,6 +83,8 @@ struct CardWebView {
         self.prefetchHTML = prefetchHTML
         self.contentAlignment = contentAlignment
         self.bottomContentInset = bottomContentInset
+        self.scrollRequestID = scrollRequestID
+        self.scrollDelta = scrollDelta
         self.onAudioStateChange = onAudioStateChange
         self.onCardBackgroundColorChange = onCardBackgroundColorChange
         self.onLookupRequested = onLookupRequested
@@ -263,6 +269,15 @@ struct CardWebView {
             webView.evaluateJavaScript("window.amgiLookup && window.amgiLookup.\(call);") { _, error in
                 if let error { Log.review.error("lookup highlight script failed: \(error)") }
             }
+        }
+
+        if scrollRequestID != coordinator.lastScrollRequestID {
+            coordinator.lastScrollRequestID = scrollRequestID
+            let sv = webView.scrollView
+            let minOffsetY = -sv.adjustedContentInset.top
+            let maxOffsetY = max(minOffsetY, sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+            let targetY = min(max(sv.contentOffset.y + scrollDelta, minOffsetY), maxOffsetY)
+            sv.setContentOffset(CGPoint(x: sv.contentOffset.x, y: targetY), animated: abs(scrollDelta) >= 40)
         }
 
     }

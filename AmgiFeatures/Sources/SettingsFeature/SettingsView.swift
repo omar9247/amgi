@@ -126,6 +126,15 @@ package struct SettingsView: View {
                 }
                 SettingsSeparator()
                 SettingsRowLink(
+                    title: "Keyboard & Controller",
+                    systemImage: "gamecontroller",
+                    tone: .info,
+                    detail: GameControllerManager.shared.isConnected ? "Connected" : nil
+                ) {
+                    ShortcutsSettingsView()
+                }
+                SettingsSeparator()
+                SettingsRowLink(
                     title: "Card Rendering",
                     systemImage: "textformat",
                     tone: .accent

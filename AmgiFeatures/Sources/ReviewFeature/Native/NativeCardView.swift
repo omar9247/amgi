@@ -19,12 +19,18 @@ struct NativeCardView: View {
     let content: NativeCardContent
     let isAnswerSide: Bool
     let mediaFolder: URL?
+    var scrollRequestID: Int = 0
+    var scrollDelta: CGFloat = 0
 
     @Environment(\.palette) private var palette
 
     @ScaledMetric(relativeTo: .largeTitle) private var headwordFront: CGFloat = 48
     @ScaledMetric(relativeTo: .title) private var headwordBack: CGFloat = 34
     @ScaledMetric(relativeTo: .body) private var bodySize: CGFloat = 20
+
+    @State private var scrollPosition = ScrollPosition(edge: .top)
+    @State private var currentOffsetY: CGFloat = 0
+    @State private var maxOffsetY: CGFloat = 0
 
     var body: some View {
         ScrollView {
@@ -42,6 +48,26 @@ struct NativeCardView: View {
             }
             .padding(.horizontal)
             .padding(.top, 8)
+        }
+        .scrollPosition($scrollPosition)
+        .onScrollGeometryChange(for: CGPoint.self) { geo in
+            CGPoint(
+                x: geo.contentOffset.y,
+                y: max(0, geo.contentSize.height - geo.containerSize.height)
+            )
+        } action: { _, metrics in
+            currentOffsetY = metrics.x
+            maxOffsetY = metrics.y
+        }
+        .onChange(of: scrollRequestID) { _, _ in
+            let target = min(max(currentOffsetY + scrollDelta, 0), maxOffsetY)
+            if abs(scrollDelta) >= 40 {
+                withAnimation(AmgiMotion.quick) {
+                    scrollPosition.scrollTo(y: target)
+                }
+            } else {
+                scrollPosition.scrollTo(y: target)
+            }
         }
     }
 

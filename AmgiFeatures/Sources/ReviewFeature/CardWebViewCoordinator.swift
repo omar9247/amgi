@@ -40,6 +40,7 @@ final class CardWebViewCoordinator: NSObject, WKNavigationDelegate, WKScriptMess
     var lastReplayRequestID: Int = 0
     var lastStopAudioRequestID: Int = 0
     var lastLookupHighlightGeneration: Int = 0
+    var lastScrollRequestID: Int = 0
     var isPageLoaded = false
     var pendingUpdateScript: String?
     var openLinksExternally: Bool = true

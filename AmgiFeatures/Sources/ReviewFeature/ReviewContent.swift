@@ -45,9 +45,17 @@ struct ReviewContent: View {
     @State private var confirmDeleteNote = false
     @State private var lookupHighlight = LookupHighlight()
     @State private var whiteboard = WhiteboardState()
+    @State private var scrollController = CardScrollController()
+
+    @Shared(.appStorage(ShortcutPreferences.Keys.keyboardShortcutsEnabled))
+    private var keyboardShortcutsEnabled: Bool = true
+
+    private var overlaysClear: Bool {
+        destination == nil && !confirmDeleteNote && cardActions.activeSheet == nil
+    }
 
     private var keyboardActive: Bool {
-        destination == nil && !confirmDeleteNote
+        keyboardShortcutsEnabled && overlaysClear && !session.requiresTypedAnswerInput
     }
 
     var body: some View {
@@ -75,6 +83,7 @@ struct ReviewContent: View {
                         lookupHighlight: lookupHighlight,
                         shortcutsEnabled: keyboardActive,
                         whiteboard: whiteboard,
+                        scrollController: scrollController,
                         lookupQuery: $destination.lookupText
                     )
                 }
@@ -159,6 +168,19 @@ struct ReviewContent: View {
                     )
                 }
             }
+            .modifier(
+                ReviewKeyboardAndGamepadShortcuts(
+                    session: session,
+                    cardActions: cardActions,
+                    whiteboard: whiteboard,
+                    scrollController: scrollController,
+                    keyboardShortcutsActive: keyboardActive,
+                    gamepadShortcutsActive: overlaysClear,
+                    destination: $destination,
+                    confirmDeleteNote: $confirmDeleteNote,
+                    onDismiss: onDismiss
+                )
+            )
         }
     }
 

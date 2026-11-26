@@ -58,6 +58,11 @@ package struct CardPreviewerView: View {
     @State private var showRenderModeSheet = false
     @State private var lookupHighlight = LookupHighlight()
     @State private var nativeAudioPlayer = NativeCardAudioPlayer()
+    @State private var scrollController = CardScrollController()
+    @State private var gamepadToken: GameControllerManager.HandlerToken?
+
+    @Shared(.appStorage(ShortcutPreferences.Keys.keyboardShortcutsEnabled))
+    private var keyboardShortcutsEnabled: Bool = true
 
     package init(
         request: CardPreviewRequest,
@@ -74,8 +79,12 @@ package struct CardPreviewerView: View {
         ))
     }
 
+    private var overlaysClear: Bool {
+        destination == nil && !confirmDeleteNote && !showRenderModeSheet && cardActions.activeSheet == nil
+    }
+
     private var keyboardActive: Bool {
-        destination == nil && !confirmDeleteNote && !showRenderModeSheet
+        keyboardShortcutsEnabled && overlaysClear
     }
 
     private var isNativeMode: Bool {
@@ -179,12 +188,35 @@ package struct CardPreviewerView: View {
                 for: .navigationBar
             )
             #endif
+            .background {
+                previewShortcutButtons
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         }
         .task {
             ReviewAudioSession.apply(playInSilent: playAudioInSilentMode)
             session.start()
         }
+        .onAppear {
+            gamepadToken = GameControllerManager.shared.registerHandler(
+                onAction: { action in
+                    guard overlaysClear, !session.isEmpty else { return }
+                    performShortcutAction(action)
+                },
+                onScrollDelta: { delta in
+                    guard overlaysClear, !session.isEmpty else { return }
+                    scrollController.scroll(by: delta)
+                }
+            )
+        }
         .onDisappear {
+            if let token = gamepadToken {
+                GameControllerManager.shared.unregisterHandler(token)
+                gamepadToken = nil
+            }
             nativeAudioPlayer.stop()
             ReviewAudioSession.release()
         }
@@ -261,7 +293,9 @@ package struct CardPreviewerView: View {
             NativeCardView(
                 content: isBack ? back : front,
                 isAnswerSide: isBack,
-                mediaFolder: session.mediaFolder
+                mediaFolder: session.mediaFolder,
+                scrollRequestID: scrollController.requestID,
+                scrollDelta: scrollController.delta
             )
         case .html:
             CardWebView(
@@ -277,6 +311,8 @@ package struct CardPreviewerView: View {
                 dictionaryScanLength: dictionaryScanLength,
                 lookupHighlight: lookupHighlight,
                 contentAlignment: CardWebViewContentAlignment(rawValue: cardContentAlignment) ?? .center,
+                scrollRequestID: scrollController.requestID,
+                scrollDelta: scrollController.delta,
                 onAudioStateChange: { playing in session.updateAudioPlaying(playing) },
                 onCardBackgroundColorChange: { color, isDark in
                     session.updateCardChrome(color: color, isDark: isDark)
@@ -497,5 +533,150 @@ package struct CardPreviewerView: View {
         let files = session.showAnswer ? back.audioFiles : front.audioFiles
         guard !files.isEmpty else { return }
         nativeAudioPlayer.play(files: files, mediaFolder: session.mediaFolder)
+    }
+
+    @ViewBuilder
+    private var previewShortcutButtons: some View {
+        Group {
+            previewShortcutButton("Flip Question / Answer", key: .return) { performShortcutAction(.showAnswerOrGood) }
+            previewShortcutButton("Scroll Card Down", key: .downArrow) { performShortcutAction(.scrollDown) }
+            previewShortcutButton("Scroll Card Down (J)", key: "j") { performShortcutAction(.scrollDown) }
+            previewShortcutButton("Scroll Card Up", key: .upArrow) { performShortcutAction(.scrollUp) }
+            previewShortcutButton("Scroll Card Up (K)", key: "k") { performShortcutAction(.scrollUp) }
+            previewShortcutButton("Edit Note", key: "e") { performShortcutAction(.editNote) }
+            previewShortcutButton("Replay Audio", key: "r") { performShortcutAction(.replayAudio) }
+            previewShortcutButton("Mark Note", key: "*") { performShortcutAction(.toggleMark) }
+            previewShortcutButton("Bury Card", key: "-") { performShortcutAction(.buryCard) }
+            previewShortcutButton("Suspend Card", key: "@") { performShortcutAction(.suspendCard) }
+            previewShortcutButton("Toggle Whiteboard", key: "w") { performShortcutAction(.toggleWhiteboard) }
+            previewShortcutButton("Clear Whiteboard", key: "w", modifiers: .shift) { performShortcutAction(.clearWhiteboard) }
+            previewShortcutButton("Close Viewer", key: .escape) { performShortcutAction(.closeReview) }
+        }
+        Group {
+            previewShortcutButton("Flag Red", key: "1", modifiers: .command) { performShortcutAction(.flagRed) }
+            previewShortcutButton("Flag Orange", key: "2", modifiers: .command) { performShortcutAction(.flagOrange) }
+            previewShortcutButton("Flag Green", key: "3", modifiers: .command) { performShortcutAction(.flagGreen) }
+            previewShortcutButton("Flag Blue", key: "4", modifiers: .command) { performShortcutAction(.flagBlue) }
+            previewShortcutButton("Flag Pink", key: "5", modifiers: .command) { performShortcutAction(.flagPink) }
+            previewShortcutButton("Flag Cyan", key: "6", modifiers: .command) { performShortcutAction(.flagCyan) }
+            previewShortcutButton("Flag Purple", key: "7", modifiers: .command) { performShortcutAction(.flagPurple) }
+            previewShortcutButton("Clear Flag", key: "0", modifiers: .command) { performShortcutAction(.clearFlag) }
+            previewShortcutButton("Reschedule Card", key: "d", modifiers: [.command, .shift]) { performShortcutAction(.reschedule) }
+            previewShortcutButton("Change Deck", key: "d", modifiers: .command) { performShortcutAction(.changeDeck) }
+        }
+    }
+
+    private func previewShortcutButton(
+        _ title: String,
+        key: KeyEquivalent,
+        modifiers: EventModifiers = [],
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(title, action: action)
+            .keyboardShortcut(keyboardActive && !session.isEmpty ? KeyboardShortcut(key, modifiers: modifiers) : nil)
+    }
+
+    private func performShortcutAction(_ action: ReviewShortcutAction) {
+        switch action {
+        case .none:
+            break
+        case .showAnswerOrGood, .showAnswer, .answerHard:
+            session.toggleAnswer()
+        case .answerAgain, .undo:
+            if session.canGoPrevious { session.goPrevious() }
+        case .answerGood, .answerEasy:
+            if session.canGoNext { session.goNext() }
+        case .replayAudio:
+            if session.isAudioPlaying {
+                session.bumpStopAudioRequest()
+            } else {
+                session.bumpReplayRequest()
+            }
+        case .editNote:
+            if let note = session.currentNote {
+                destination = .editNote(note)
+            }
+        case .toggleMark:
+            if let noteId = session.currentNote?.id {
+                Task {
+                    _ = await cardActions.toggleMarked(noteId)
+                    onCollectionChanged()
+                    session.refreshAfterCardAction()
+                }
+            }
+        case .buryCard:
+            if let cardId = session.currentCardId {
+                Task {
+                    if await cardActions.toggleBury(cardId) != nil {
+                        onCollectionChanged()
+                        session.refreshAfterCardAction()
+                    }
+                }
+            }
+        case .buryNote:
+            if let noteId = session.currentNote?.id {
+                Task {
+                    if await cardActions.buryNote(noteId) != nil {
+                        onCollectionChanged()
+                        session.refreshAfterCardAction()
+                    }
+                }
+            }
+        case .suspendCard:
+            if let cardId = session.currentCardId {
+                Task {
+                    if await cardActions.toggleSuspend(cardId) != nil {
+                        onCollectionChanged()
+                        session.refreshAfterCardAction()
+                    }
+                }
+            }
+        case .suspendNote:
+            if let noteId = session.currentNote?.id {
+                Task {
+                    if await cardActions.suspendNote(noteId) != nil {
+                        onCollectionChanged()
+                        session.refreshAfterCardAction()
+                    }
+                }
+            }
+        case .reschedule:
+            if let cardId = session.currentCardId {
+                cardActions.activeSheet = .reschedule([cardId])
+            }
+        case .changeDeck:
+            if let cardId = session.currentCardId {
+                cardActions.activeSheet = .changeDeck(cardIds: [cardId], currentDeckId: cardActions.currentDeckId)
+            }
+        case .deleteNote:
+            if session.currentNote != nil {
+                confirmDeleteNote = true
+            }
+        case .flagRed, .flagOrange, .flagGreen, .flagBlue, .flagPink, .flagCyan, .flagPurple:
+            guard let cardId = session.currentCardId, let flagVal = action.flagValue else { return }
+            let next: UInt32 = cardActions.currentFlag == flagVal ? 0 : flagVal
+            Task {
+                _ = await cardActions.flag(cardId, next)
+                onCollectionChanged()
+                session.refreshAfterCardAction()
+            }
+        case .clearFlag:
+            guard let cardId = session.currentCardId else { return }
+            Task {
+                _ = await cardActions.flag(cardId, 0)
+                onCollectionChanged()
+                session.refreshAfterCardAction()
+            }
+        case .toggleWhiteboard:
+            whiteboard.toggleOpen()
+        case .clearWhiteboard:
+            if whiteboard.isOpen { whiteboard.clear() }
+        case .scrollDown:
+            scrollController.scroll(by: 180)
+        case .scrollUp:
+            scrollController.scroll(by: -180)
+        case .closeReview:
+            onDismiss()
+        }
     }
 }

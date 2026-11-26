@@ -37,6 +37,7 @@ struct ReviewCardArea: View {
     let lookupHighlight: LookupHighlight
     let shortcutsEnabled: Bool
     let whiteboard: WhiteboardState
+    var scrollController: CardScrollController = CardScrollController()
     @Binding var lookupQuery: String?
 
     @Environment(\.palette) private var palette
@@ -121,7 +122,6 @@ struct ReviewCardArea: View {
                         .padding()
                 }
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut(keyboardActive ? KeyboardShortcut(.space, modifiers: []) : nil)
                 .padding()
             }
         }
@@ -134,7 +134,7 @@ struct ReviewCardArea: View {
     }
 
     private var keyboardActive: Bool {
-        shortcutsEnabled && !showRenderModeSheet && !session.isTypedAnswerCard
+        shortcutsEnabled && !showRenderModeSheet && !session.requiresTypedAnswerInput
     }
 
     /// The reveal region. Native cards get the 3D flip (pure SwiftUI, crisp);
@@ -183,7 +183,9 @@ struct ReviewCardArea: View {
             NativeCardView(
                 content: isBack ? back : front,
                 isAnswerSide: isBack,
-                mediaFolder: mediaFolder
+                mediaFolder: mediaFolder,
+                scrollRequestID: scrollController.requestID,
+                scrollDelta: scrollController.delta
             )
         case .html:
             VStack(spacing: 0) {
@@ -199,6 +201,8 @@ struct ReviewCardArea: View {
                     dictionaryScanLength: dictionaryScanLength,
                     lookupHighlight: lookupHighlight,
                     contentAlignment: CardWebViewContentAlignment(rawValue: cardContentAlignment) ?? .center,
+                    scrollRequestID: scrollController.requestID,
+                    scrollDelta: scrollController.delta,
                     onAudioStateChange: { playing in session.updateAudioPlaying(playing) },
                     onCardBackgroundColorChange: { color, isDark in
                         session.updateCardChrome(color: color, isDark: isDark)

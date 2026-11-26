@@ -144,6 +144,7 @@ public struct RootView: View {
         MainTabView(
             refreshID: refreshID,
             showReaderTab: showReaderTab,
+            isGlobalShortcutsEnabled: pendingReviewDeckId == nil && !showImport && wordSheet == nil,
             onImport: { showImport = true },
             onSelectStudyDeck: { pendingReviewDeckId = $0 }
         )
