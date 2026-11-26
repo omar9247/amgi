@@ -9,6 +9,7 @@ import AppCore
 import Foundation
 import SwiftUI
 import Theme
+import UI
 
 /// Floating GoodNotes-style ink & whiteboard toolbar + overlay container.
 struct WhiteboardOverlayView<Content: View>: View {
