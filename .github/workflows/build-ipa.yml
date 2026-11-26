@@ -7,6 +7,14 @@ on:
         description: 'Skip Debug Simulator build-for-testing to build unsigned IPA faster'
         type: boolean
         default: true
+      runner:
+        description: 'GitHub-hosted macOS runner label (use macos-26-intel when arm64 pool is congested)'
+        type: choice
+        default: macos-26-intel
+        options:
+          - macos-26-intel
+          - macos-26
+          - macos-15
   push:
     tags:
       - 'v*'
@@ -28,7 +36,7 @@ defaults:
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner || 'macos-26-intel' }}
     timeout-minutes: 60
 
     steps:
@@ -210,11 +218,11 @@ jobs:
 
           for log_file in simulator-build.log build.log; do
             if [ -f "$log_file" ]; then
-              ERROR_LINES=$(grep -n "error:" "$log_file" | head -100 || true)
+              ERROR_LINES=$(grep -n "error:" "$log_file" | head -200 || true)
               if [ -n "$ERROR_LINES" ]; then
                 {
                   echo ""
-                  echo "## Errors in $log_file (first 100)"
+                  echo "## Errors in $log_file (first 200)"
                   echo '```'
                   echo "$ERROR_LINES"
                   echo '```'
