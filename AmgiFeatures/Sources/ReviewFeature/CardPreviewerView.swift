@@ -13,7 +13,6 @@ import AppCore
 package import AppShared
 import AnkiClients
 import AnkiKit
-import CasePaths
 import Dependencies
 import BrowseFeature
 import TemplatesFeature
@@ -21,30 +20,13 @@ import Sharing
 import ReviewCore
 import SwiftUINavigation
 
-@CasePathable
-private enum CardPreviewDestination {
-    case editNote(NoteRecord)
-    case editTemplate(ReviewSession.TemplateTarget)
-    case lookup(String)
-}
-
-private extension Optional where Wrapped == CardPreviewDestination {
-    var lookupText: String? {
-        get {
-            guard case .lookup(let text) = self else { return nil }
-            return text
-        }
-        set { self = newValue.map(CardPreviewDestination.lookup) }
-    }
-}
-
 /// AnkiDroid-style non-marking Card Viewer / Previewer.
 /// Lets the user browse through cards, flip Question/Answer, toggle auto-reveal,
 /// annotate with the GoodNotes-style Whiteboard, and edit/flag/reschedule cards
 /// without affecting FSRS scheduling or review counts.
 package struct CardPreviewerView: View {
     let request: CardPreviewRequest
-    let onCollectionChanged: () -> Void
+    let onCollectionChanged: @MainActor @Sendable () -> Void
     let onDismiss: () -> Void
 
     @Shared(.appStorage(ReviewPreferences.Keys.openLinksExternally))
@@ -72,14 +54,14 @@ package struct CardPreviewerView: View {
     @State private var whiteboard = WhiteboardState()
     @State private var cardActions = CardContextMenuModel()
     @State private var confirmDeleteNote = false
-    @State private var destination: CardPreviewDestination?
+    @State private var destination: ReviewDestination?
     @State private var showRenderModeSheet = false
     @State private var lookupHighlight = LookupHighlight()
     @State private var nativeAudioPlayer = NativeCardAudioPlayer()
 
     package init(
         request: CardPreviewRequest,
-        onCollectionChanged: @escaping () -> Void = {},
+        onCollectionChanged: @escaping @MainActor @Sendable () -> Void = {},
         onDismiss: @escaping () -> Void
     ) {
         self.request = request
@@ -148,14 +130,18 @@ package struct CardPreviewerView: View {
                 }
             }
             .sheet(item: $destination.editTemplate) { target in
+                let onCollectionChanged = self.onCollectionChanged
+                let session = self.session
                 NavigationStack {
                     TemplateEditorView(
                         notetypeId: target.notetypeId,
                         initialTemplateIndex: target.ordinal,
                         mode: .currentCard,
                         onSaved: {
-                            onCollectionChanged()
-                            session.refreshAfterCardAction()
+                            await MainActor.run {
+                                onCollectionChanged()
+                                session.refreshAfterCardAction()
+                            }
                         }
                     )
                 }
@@ -442,7 +428,7 @@ package struct CardPreviewerView: View {
             Section {
                 Button {
                     cardActions.presentAfterMenuDismiss {
-                        destination = note.map(CardPreviewDestination.editNote)
+                        destination = note.map(ReviewDestination.editNote)
                     }
                 } label: {
                     Label("Edit Note", systemImage: "pencil")
@@ -451,7 +437,7 @@ package struct CardPreviewerView: View {
 
                 Button {
                     cardActions.presentAfterMenuDismiss {
-                        destination = templateTarget.map(CardPreviewDestination.editTemplate)
+                        destination = templateTarget.map(ReviewDestination.editTemplate)
                     }
                 } label: {
                     Label("Edit Template", systemImage: "square.and.pencil")

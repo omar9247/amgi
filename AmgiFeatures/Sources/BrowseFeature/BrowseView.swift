@@ -61,10 +61,11 @@ package struct BrowseView: View {
             }
             .fullScreenCover(item: $previewRequest) { request in
                 if let cardPreview {
+                    let collectionStore = store
                     cardPreview.previewView(
                         request: request,
                         onCollectionChanged: {
-                            store.invalidateAll()
+                            collectionStore.invalidateAll()
                         },
                         onDismiss: {
                             previewRequest = nil

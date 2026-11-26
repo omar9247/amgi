@@ -130,9 +130,10 @@ struct DeckDetailView: View {
         }
         .fullScreenCover(item: $previewRequest) { request in
             if let cardPreview {
+                let collectionStore = store
                 cardPreview.previewView(
                     request: request,
-                    onCollectionChanged: { store.invalidateAll() },
+                    onCollectionChanged: { collectionStore.invalidateAll() },
                     onDismiss: {
                         previewRequest = nil
                         store.invalidateAll()

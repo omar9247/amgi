@@ -2,6 +2,11 @@ name: Build Unsigned IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_simulator_check:
+        description: 'Skip Debug Simulator build-for-testing to build unsigned IPA faster'
+        type: boolean
+        default: true
   push:
     tags:
       - 'v*'
@@ -71,7 +76,15 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
 
+      - name: Cache Rust XCFramework
+        id: xcframework-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: AnkiRustLib.xcframework
+          key: ${{ runner.os }}-xcframework-${{ hashFiles('anki-bridge-rs/Cargo.lock', 'anki-bridge-rs/src/**', 'anki-bridge-rs/include/**', 'scripts/build-xcframework.sh', '.gitmodules') }}
+
       - name: Build Rust XCFramework
+        if: steps.xcframework-cache.outputs.cache-hit != 'true'
         run: |
           chmod +x ./scripts/build-xcframework.sh
           ./scripts/build-xcframework.sh
@@ -89,6 +102,7 @@ jobs:
           ls -la AmgiApp/
 
       - name: Build Debug Simulator (Compatibility Smoke Check)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.skip_simulator_check != true }}
         run: |
           set -o pipefail
           DERIVED_DATA_PATH="$RUNNER_TEMP/DerivedData"
@@ -194,16 +208,29 @@ jobs:
             fi
           } > build-summary.md
 
-          if [ -f build.log ]; then
-            {
-              echo ""
-              echo "## Compile Log Tail"
-              echo '```'
-              tail -20 build.log
-              echo '```'
-            } >> build-summary.md
-          fi
+          for log_file in simulator-build.log build.log; do
+            if [ -f "$log_file" ]; then
+              ERROR_LINES=$(grep -n "error:" "$log_file" | head -100 || true)
+              if [ -n "$ERROR_LINES" ]; then
+                {
+                  echo ""
+                  echo "## Errors in $log_file (first 100)"
+                  echo '```'
+                  echo "$ERROR_LINES"
+                  echo '```'
+                } >> build-summary.md
+              fi
+              {
+                echo ""
+                echo "## $log_file Tail"
+                echo '```'
+                tail -20 "$log_file"
+                echo '```'
+              } >> build-summary.md
+            fi
+          done
 
+          cat build-summary.md >> "$GITHUB_STEP_SUMMARY"
           cat build-summary.md
 
       - name: Upload Build Summary

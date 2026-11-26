@@ -304,7 +304,7 @@ struct WhiteboardPenSettingsPopover: View {
                                             selected ? palette.accent : palette.background,
                                             in: Capsule()
                                         )
-                                        .foregroundStyle(selected ? .white : palette.textPrimary)
+                                        .foregroundStyle(selected ? palette.background : palette.textPrimary)
                                 }
                                 .buttonStyle(.plain)
                             }

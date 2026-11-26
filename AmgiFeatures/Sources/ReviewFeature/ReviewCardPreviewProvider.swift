@@ -16,7 +16,7 @@ package struct ReviewCardPreviewProvider: CardPreviewProviding {
 
     package func previewView(
         request: CardPreviewRequest,
-        onCollectionChanged: @escaping () -> Void,
+        onCollectionChanged: @escaping @MainActor @Sendable () -> Void,
         onDismiss: @escaping () -> Void
     ) -> AnyView {
         AnyView(

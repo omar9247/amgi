@@ -39,7 +39,7 @@ public struct CardPreviewRequest: Identifiable, Equatable, Sendable {
 public protocol CardPreviewProviding {
     func previewView(
         request: CardPreviewRequest,
-        onCollectionChanged: @escaping () -> Void,
+        onCollectionChanged: @escaping @MainActor @Sendable () -> Void,
         onDismiss: @escaping () -> Void
     ) -> AnyView
 }
