@@ -337,7 +337,9 @@ public struct HostedCardContextMenu: View {
             if let onEditNote {
                 Section {
                     Button {
-                        model.presentAfterMenuDismiss(onEditNote)
+                        model.presentAfterMenuDismiss {
+                            onEditNote()
+                        }
                     } label: {
                         Label("Edit Note", systemImage: "pencil")
                     }
